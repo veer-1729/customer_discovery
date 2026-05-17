@@ -1,13 +1,21 @@
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 *.egg-info/
 dist/
 build/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.DS_Store
+*.log
+
+# Generated pipeline outputs (keep data/.gitkeep)
 data/raw/
 data/research/
 data/outreach/

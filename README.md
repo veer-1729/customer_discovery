@@ -1,22 +1,88 @@
-# Customer Discovery Lead Research Automation
+# Customer Discovery
 
-Turn broad company lists (YC, CMU, etc.) into a normalized `data/companies.jsonl` for downstream research and outreach (Parts 2–3 planned).
+End-to-end CLI for startup lead research and outreach prep:
 
-## Setup
+1. **Scrape** company lists (YC directory, CMU Airtable) → `data/companies.jsonl`
+2. **Research** public evidence, score fit, rank leads → `data/research/`
+3. **Outreach** generate email + LinkedIn drafts → `data/outreach/`
+
+**CLI:** `customer-discovery` (alias `customer_discovery`). Do not use `cd` — that is the shell change-directory command.
+
+---
+
+## Quick start (production run)
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+
+cp .env.example .env
+# Edit .env: set OPENAI_API_KEY (required for research + outreach)
+# Optional: TAVILY_API_KEY if using search fallback in config/research.yaml
+
+customer-discovery scrape --source yc --limit 50 --founders
+customer-discovery research --limit 50 --resume
+customer-discovery outreach --limit 20 --resume
+
+customer-discovery companies stats
+customer-discovery research stats
+customer-discovery outreach stats
 ```
 
-**CLI name:** `customer-discovery` (alias: `customer_discovery`).  
-Not `cd` — that conflicts with the shell “change directory” command.
+Review outputs: `data/research/top_leads.csv`, `data/outreach/outreach_queue.csv`.
 
-```bash
-customer-discovery --help
-customer-discovery scrape --help
+---
+
+## Architecture
+
 ```
+┌─────────────┐     ┌──────────────────────────────────────┐     ┌─────────────────┐
+│ Part 1      │     │ Part 2: research                     │     │ Part 3: outreach│
+│ scrape      │────▶│ evidence → signals → triage (mini)   │────▶│ email + LinkedIn│
+│ yc / cmu    │     │ → critic → premium (4o) → CSV rank   │     │ seed contacts   │
+└─────────────┘     └──────────────────────────────────────┘     └─────────────────┘
+ companies.jsonl         research/*.jsonl + top_leads.csv          outreach_queue.csv
+```
+
+| Config | Purpose |
+|--------|---------|
+| [`config/sources/yc.yaml`](config/sources/yc.yaml) | Default YC batch/region/team filters |
+| [`config/sources/cmu_airtable.yaml`](config/sources/cmu_airtable.yaml) | CMU column map, views, employee buckets |
+| [`config/product.yaml`](config/product.yaml) | Product name, value props, outreach tone (Emergent Delta) |
+| [`config/icp.yaml`](config/icp.yaml) | ICP rubric for LLM prompts |
+| [`config/research.yaml`](config/research.yaml) | Models, search provider, stage gates, paths |
+| [`config/outreach.yaml`](config/outreach.yaml) | Lead gates, contact rules, outreach models |
+
+---
+
+## Environment variables
+
+| Variable | Required | Used by |
+|----------|----------|---------|
+| `OPENAI_API_KEY` | Yes (research + outreach) | Triage, critic, premium, outreach drafts |
+| `TAVILY_API_KEY` | No | Search fallback when enabled in `config/research.yaml` |
+| `SERPAPI_API_KEY` / `BRAVE_SEARCH_API_KEY` / etc. | No | Alternative search providers |
+| `AIRTABLE_API_KEY` | No | CMU `--api` only (CSV export needs no key) |
+
+Load via `.env` in the project root (gitignored) or export in your shell.
+
+---
+
+## Data layout (gitignored)
+
+| Path | Description |
+|------|-------------|
+| `data/companies.jsonl` | Normalized company records (Part 1) |
+| `data/research/evidence_bundles.jsonl` | Fetched pages + coverage |
+| `data/research/final_briefs.jsonl` | Best brief per company |
+| `data/research/top_leads.csv` | Ranked leads for outreach gating |
+| `data/outreach/outreach_packs.jsonl` | Full outreach packs |
+| `data/outreach/outreach_queue.csv` | Human send queue |
+| `data/raw/research/{company_id}/` | Cached HTML per fetch |
+| `data/raw/outreach/{company_id}/` | LLM output cache |
+
+Only `data/.gitkeep` is tracked; pipeline outputs stay local.
 
 ---
 
@@ -24,12 +90,25 @@ customer-discovery scrape --help
 
 | Command | Purpose |
 |---------|---------|
-| `customer-discovery scrape` | Fetch companies from a source → `data/companies.jsonl` |
-| `customer-discovery companies stats` | Summarize the JSONL file |
-| `customer-discovery companies export -o PATH` | Export JSONL to CSV |
+| `customer-discovery scrape` | Part 1: fetch companies → JSONL |
+| `customer-discovery research` | Part 2: evidence, scoring, LLM funnel, ranking |
+| `customer-discovery outreach` | Part 3: outreach drafts from ranked leads |
+| `customer-discovery companies stats` | Summarize `companies.jsonl` |
+| `customer-discovery companies export -o PATH` | Export companies to CSV |
+| `customer-discovery research stats` / `research show ID` | Inspect research outputs |
+| `customer-discovery outreach stats` / `outreach show ID` | Inspect outreach packs |
 | `customer-discovery sources list` | List sources (`yc`, `cmu`) |
 | `customer-discovery schema` | Print `CompanyRecord` JSON schema |
-| `customer-discovery schema -o path.yaml` | Write schema to a file |
+
+### Common flags (all pipelines)
+
+| Flag | Description |
+|------|-------------|
+| `--limit` / `-n` | Cap companies processed this run |
+| `--resume` | Skip rows already in the stage output file |
+| `--dry-run` | Preview without LLM writes (research/outreach) or no scrape write |
+| `--company-id` | Process a single company slug |
+| `--verbose` / `-v` | Debug logging |
 
 ### `scrape` — flags that apply to every source
 
@@ -424,8 +503,17 @@ customer-discovery scrape --source yc --resume --limit 200
 ## Tests
 
 ```bash
-pytest
-pytest -v tests/test_cmu_filters.py tests/test_cmu_employee_size.py
+pytest                    # 37 tests
+pytest -v                 # verbose
+pytest tests/test_outreach.py tests/test_url_catalog.py
+```
+
+Run before pushing:
+
+```bash
+pip install -e ".[dev]"
+pytest -q
+customer-discovery --help
 ```
 
 ---
@@ -450,22 +538,27 @@ export TAVILY_API_KEY=tvly-...
 pip install -e ".[dev]"
 ```
 
+### Research flags
+
+| Flag | Description |
+|------|-------------|
+| `--input` / `-i` | Companies JSONL (default `data/companies.jsonl`) |
+| `--output-dir` | Default `data/research` |
+| `--dry-run` | Evidence + signals only; no LLM |
+| `--skip-critic` | Triage only |
+| `--skip-premium` | Stop after critic/reviewed |
+| `--top-n` | Premium cap (default 100) |
+| `--no-fallback-search` | Disable all search API calls |
+| `--estimate-cost` | Print projected LLM cost |
+| `--force-refetch` | Ignore raw HTML cache |
+
 ### Run research
 
 ```bash
-# Evidence + signals + deterministic score only (no LLM cost)
 customer-discovery research --dry-run --limit 10
-
-# Full pipeline (pilot)
 customer-discovery research --limit 20 --resume
-
-# Cost estimate before a large run
-customer-discovery research --estimate-cost --limit 1000
-
-# Disable all search API calls
+customer-discovery research --estimate-cost
 customer-discovery research --no-fallback-search
-
-# Skip expensive stages during dev
 customer-discovery research --skip-critic --skip-premium
 ```
 
@@ -502,8 +595,21 @@ Product copy for prompts: `config/product.yaml` (Emergent Delta). ICP rubric: `c
 
 Turn ranked leads into email + LinkedIn drafts. Contacts are **seed-only** (from `companies.jsonl` team/LinkedIn); fill gaps manually.
 
+### Outreach flags
+
+| Flag | Description |
+|------|-------------|
+| `--leads` | Default `data/research/top_leads.csv` |
+| `--briefs` | Default `data/research/final_briefs.jsonl` |
+| `--evidence` | Refresh `important_urls` from `evidence_bundles.jsonl` |
+| `--min-score` | Gate minimum `final_score` (default 70) |
+| `--top-n` | Max leads to process (default 100) |
+| `--include-manual-review` | Include `manual_review_required` rows |
+| `--estimate-cost` | Print projected LLM cost |
+| `--force-regenerate` | Ignore resume for packs |
+
 ```bash
-customer-discovery outreach --dry-run          # gated lead count
+customer-discovery outreach --dry-run
 customer-discovery outreach --limit 20 --resume
 customer-discovery outreach stats
 customer-discovery outreach show COMPANY_ID
@@ -547,11 +653,34 @@ customer-discovery outreach show COMPANY_ID
 
 ---
 
-## What is not built yet
+## Production checklist
+
+Before your first full (~1k company) run:
+
+- [ ] `pip install -e ".[dev]"` and `pytest -q` pass
+- [ ] `.env` has `OPENAI_API_KEY` (never commit `.env`)
+- [ ] Customize [`config/product.yaml`](config/product.yaml) for your product
+- [ ] Pilot: `scrape --limit 20` → `research --limit 20` → `outreach --limit 10`
+- [ ] `research --estimate-cost` and `outreach --estimate-cost` for budget
+- [ ] Use `--resume` on long runs so interruptions are recoverable
+- [ ] Human-review `top_leads.csv` and `outreach_queue.csv` before sending mail
+- [ ] Respect site terms and rate limits (YC Algolia, target websites, search APIs)
+
+**Cost (rough):** ~1k companies — research triage (mini) ~$5–35; premium top 100 (4o) ~$8–50; outreach top 100 (mini) ~$1–5. Use `--dry-run` and `--limit` to control spend.
+
+**Operational notes:**
+
+- Search fallback disables itself if the configured API key is missing (warning in logs).
+- YC `website` comes from Algolia (same as on [yc.com/companies/...](https://www.ycombinator.com/companies)); use `--founders` for named contacts in outreach.
+- Outreach contacts are **seed-only**; add names/LinkedIn manually when `review_warnings` contains `no_seed_contact`.
+
+---
+
+## Out of scope (future work)
 
 - Live CMU grid scrape without CSV/API
-- Contact enrichment APIs (Apollo, etc.)
-- Automated email sending
+- Contact enrichment (Apollo, Hunter, etc.)
+- Automated email/CRM sending
 
 ---
 
@@ -561,11 +690,16 @@ customer-discovery outreach show COMPANY_ID
 |---------|-----|
 | `command not found: customer-discovery` | `source .venv/bin/activate` and `pip install -e .` |
 | Shell runs `cd` instead of our CLI | Use `customer-discovery`, not `cd` |
+| `OPENAI_API_KEY is required` | Set in `.env` or `export OPENAI_API_KEY=...` |
+| `Missing leads file` / outreach fails | Run `customer-discovery research` first |
+| `TAVILY_API_KEY` warning | Set key or use `research --no-fallback-search` |
 | CMU requires `--csv` | Export CSV from Airtable or use `--api` |
 | YC team size error | Pass **both** `--team-size-min` and `--team-size-max` |
 | CMU filter matches nothing | Check exact field names (colons matter); try `--dry-run` |
 | `--resume` adds 0 companies | All IDs already in output; normal if list unchanged |
-| SSL errors on `pip install` | Use system Python certs or `pip install --trusted-host` (env-specific) |
+| Research stuck / slow | Use `--limit`; check network; raw cache under `data/raw/research/` |
+| `ready_to_send: false` in outreach | Add seed contact (`--founders` on scrape) or send manually after review |
+| SSL errors on `pip install` | Use system Python certs or env-specific pip trust flags |
 
 For help on any command:
 

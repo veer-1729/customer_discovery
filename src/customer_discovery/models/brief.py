@@ -17,7 +17,7 @@ class IcpFit(BaseModel):
 
 
 class ResearchBrief(BaseModel):
-    """Part 2 output schema (stub — generation not implemented yet)."""
+    """Legacy brief schema; Part 2 uses FinalBrief in models/final.py."""
 
     company_id: str
     summary: str | None = None
