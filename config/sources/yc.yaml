@@ -1,0 +1,40 @@
+source_id: yc
+program: YC
+filters:
+  batches:
+    - "Winter 2027"
+    - "Fall 2026"
+    - "Summer 2026"
+    - "Spring 2026"
+    - "Winter 2026"
+    - "Fall 2025"
+    - "Summer 2025"
+    - "Spring 2025"
+    - "Winter 2025"
+    - "Summer 2020"
+    - "Winter 2020"
+    - "Summer 2019"
+    - "Winter 2019"
+    - "Summer 2018"
+    - "Winter 2018"
+    - "Summer 2012"
+    - "Winter 2012"
+    - "Summer 2011"
+    - "Winter 2011"
+    - "Summer 2010"
+    - "Winter 2010"
+    - "Summer 2009"
+    - "Winter 2009"
+    - "Summer 2008"
+    - "Winter 2008"
+  regions:
+    - "United States of America"
+    - "Remote"
+    - "India"
+  industries: []
+  statuses: []
+  team_size_min: 1
+  team_size_max: 25
+  query: ""
+rate_limit_rps: 1.5
+fetch_founders: false

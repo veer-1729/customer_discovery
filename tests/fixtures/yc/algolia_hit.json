@@ -1,0 +1,17 @@
+{
+  "name": "Example Corp",
+  "slug": "example-corp",
+  "website": "https://example.com",
+  "one_liner": "We build example software",
+  "long_description": "Longer description here",
+  "batch": "Winter 2025",
+  "industries": ["B2B", "SaaS"],
+  "tags": ["Developer Tools"],
+  "status": "Active",
+  "team_size": 12,
+  "regions": ["United States of America"],
+  "all_locations": "San Francisco, CA",
+  "isHiring": true,
+  "top_company": false,
+  "objectID": "12345"
+}

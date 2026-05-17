@@ -1,0 +1,36 @@
+source_id: cmu
+program: CMU
+shared_view_url: https://airtable.com/appoCn0JyaYH2Pbab/shrpqgg6AsoRH8JbD?jrprS=allRecords
+base_id: appoCn0JyaYH2Pbab
+# table_name: required only for --api (set after inspecting your base)
+table_name: null
+views:
+  all: allRecords
+  all_companies: allRecords
+  hiring: sfs4SOTOw9s4Qq8Ux
+  pittsburgh: sfsWPsb5WHWHwiqhN
+column_map:
+  name: Company Name
+  website: "Company website:"
+  description: Company Description
+  industry: Verticals
+  location: "Company location:"
+  founder: "Name of CMU affiliated founder:"
+  linkedin: "LinkedIn:"
+  employees: "Number of employees:"
+employee_size:
+  field: "Number of employees:"
+  # Airtable single-select buckets (extend if the base adds more)
+  buckets:
+    - "1-10"
+    - "11-20"
+    - "21-30"
+    - "31-50"
+    - "51-100"
+    - "101-250"
+    - "251-500"
+    - "500+"
+filters:
+  conditions: []
+  conjunction: and
+  # employee_size: "1-30"  # optional default range

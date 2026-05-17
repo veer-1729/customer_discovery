@@ -1,0 +1,14 @@
+# ICP rubric for Part 2 (deep research). Consumed by research engine later.
+product: incident RCA / production reliability
+target_profile:
+  - small engineering team
+  - B2B or customer-facing product
+  - backend or platform ownership
+  - on-call or reliability language in public materials
+  - API or integration surface
+disqualifiers:
+  - obvious mature SRE team
+  - purely consumer with no production complexity
+  - too early (no product)
+  - hardware-heavy with little software ops surface
+  - very mature enterprise with dedicated reliability org
