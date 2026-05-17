@@ -1,0 +1,17 @@
+name: Emergent Delta
+one_liner: AI-assisted incident RCA for small production engineering teams
+value_props:
+  - Faster incident root-cause analysis for small eng teams
+  - Surfaces hypotheses from logs, deploys, and runbooks without a full SRE org
+  - Fits teams that already own on-call but lack dedicated reliability headcount
+ideal_customer:
+  - B2B or production-critical software (APIs, integrations, customer-facing uptime)
+  - Small engineering team (roughly 5–50 engineers)
+  - Backend/platform/SRE hiring or on-call language in public materials
+  - Public API docs, webhooks, or integrations
+disqualifiers:
+  - Pre-launch with no product surface
+  - Pure consumer app with no production complexity narrative
+  - Mature enterprise with large dedicated SRE/reliability org
+  - Hardware/biotech with minimal software ops surface
+outreach_tone: direct, technical, not salesy

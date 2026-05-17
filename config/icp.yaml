@@ -1,14 +1,26 @@
-# ICP rubric for Part 2 (deep research). Consumed by research engine later.
 product: incident RCA / production reliability
 target_profile:
-  - small engineering team
-  - B2B or customer-facing product
+  - small engineering team (roughly 5–50)
+  - B2B or customer-facing production software
   - backend or platform ownership
   - on-call or reliability language in public materials
-  - API or integration surface
+  - API, webhooks, or integration surface
+positive_signals:
+  - hiring backend, platform, infra, SRE, or devops
+  - public API or developer docs
+  - status page or changelog discipline
+  - mentions incident response, on-call, or production ownership
 disqualifiers:
-  - obvious mature SRE team
-  - purely consumer with no production complexity
-  - too early (no product)
-  - hardware-heavy with little software ops surface
-  - very mature enterprise with dedicated reliability org
+  - obvious mature dedicated SRE org at scale
+  - purely consumer with no production complexity narrative
+  - too early (no product, pre-launch only)
+  - hardware-heavy or lab-only with little software ops surface
+  - very mature enterprise reliability org
+scoring_hints:
+  strong: B2B + API/docs + hiring platform/backend + on-call language
+  weak: consumer-only, no website, no public technical surface
+prompt_rubric: |
+  Score fit for Emergent Delta (AI-assisted incident RCA for small production teams).
+  Reward evidence of production-critical software, APIs, on-call/reliability language,
+  and hiring for backend/platform. Penalize pre-launch, consumer-only, or mature SRE org signals.
+  Never invent customers, integrations, or tools not present in evidence.

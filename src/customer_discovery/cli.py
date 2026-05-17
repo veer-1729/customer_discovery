@@ -29,8 +29,12 @@ import customer_discovery.sources.airtable  # noqa: F401
 app = typer.Typer(help="Customer discovery: company sourcing and outreach prep")
 sources_app = typer.Typer(help="List data sources")
 companies_app = typer.Typer(help="Inspect company list output")
+research_app = typer.Typer(help="Deep research pipeline (Part 2)")
+outreach_app = typer.Typer(help="Outreach pack generation (Part 3)")
 app.add_typer(sources_app, name="sources")
 app.add_typer(companies_app, name="companies")
+app.add_typer(research_app, name="research")
+app.add_typer(outreach_app, name="outreach")
 
 
 def _project_root() -> Path:
@@ -325,6 +329,256 @@ def companies_export(
                 }
             )
     typer.echo(f"Exported {len(records)} rows to {output}")
+
+
+def _default_research_dir() -> Path:
+    return _project_root() / "data" / "research"
+
+
+def _default_raw_cache() -> Path:
+    return _project_root() / "data" / "raw" / "research"
+
+
+@research_app.callback(invoke_without_command=True)
+def research_main(
+    ctx: typer.Context,
+    input: Path = typer.Option(
+        _project_root() / "data" / "companies.jsonl",
+        "--input",
+        "-i",
+    ),
+    output_dir: Path = typer.Option(_default_research_dir(), "--output-dir"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n"),
+    resume: bool = typer.Option(False, "--resume"),
+    company_id: Optional[str] = typer.Option(None, "--company-id"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    skip_critic: bool = typer.Option(False, "--skip-critic"),
+    skip_premium: bool = typer.Option(False, "--skip-premium"),
+    top_n: int = typer.Option(100, "--top-n"),
+    no_fallback_search: bool = typer.Option(False, "--no-fallback-search"),
+    estimate_cost: bool = typer.Option(False, "--estimate-cost"),
+    force_refetch: bool = typer.Option(False, "--force-refetch"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Run the full research pipeline (default when no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _run_research(
+        input=input,
+        output_dir=output_dir,
+        limit=limit,
+        resume=resume,
+        company_id=company_id,
+        dry_run=dry_run,
+        skip_critic=skip_critic,
+        skip_premium=skip_premium,
+        top_n=top_n,
+        no_fallback_search=no_fallback_search,
+        estimate_cost=estimate_cost,
+        force_refetch=force_refetch,
+        verbose=verbose,
+    )
+
+
+def _run_research(**kwargs) -> None:
+    from customer_discovery.research.pipeline.orchestrator import ResearchOptions, ResearchOrchestrator
+
+    _setup_logging(kwargs.pop("verbose", False))
+    opts = ResearchOptions(
+        input_path=kwargs["input"],
+        output_dir=kwargs["output_dir"],
+        raw_cache_dir=_default_raw_cache(),
+        limit=kwargs.get("limit"),
+        company_id=kwargs.get("company_id"),
+        resume=kwargs.get("resume", False),
+        dry_run=kwargs.get("dry_run", False),
+        skip_critic=kwargs.get("skip_critic", False),
+        skip_premium=kwargs.get("skip_premium", False),
+        top_n=kwargs.get("top_n", 100),
+        no_fallback_search=kwargs.get("no_fallback_search", False),
+        estimate_cost=kwargs.get("estimate_cost", False),
+        force_refetch=kwargs.get("force_refetch", False),
+    )
+    stats = ResearchOrchestrator(opts).run()
+    typer.echo(
+        f"Research done. processed={stats.processed} evidence={stats.evidence} "
+        f"signals={stats.signals} triage={stats.triage} critic={stats.critic} "
+        f"premium={stats.premium} final={stats.final}"
+    )
+
+
+@research_app.command("stats")
+def research_stats(
+    output_dir: Path = typer.Option(_default_research_dir(), "--output-dir"),
+) -> None:
+    """Summarize staged research outputs."""
+    from customer_discovery.storage.staged_jsonl import read_staged
+    from customer_discovery.models.evidence import EvidenceBundle
+    from customer_discovery.models.triage import TriageBrief
+    from customer_discovery.models.final import FinalBrief
+
+    files = {
+        "evidence_bundles": (output_dir / "evidence_bundles.jsonl", EvidenceBundle),
+        "triage_briefs": (output_dir / "triage_briefs.jsonl", TriageBrief),
+        "final_briefs": (output_dir / "final_briefs.jsonl", FinalBrief),
+    }
+    for label, (path, model) in files.items():
+        n = len(read_staged(path, model)) if path.exists() else 0
+        typer.echo(f"{label}: {n}")
+    csv_path = output_dir / "top_leads.csv"
+    typer.echo(f"top_leads.csv: {'yes' if csv_path.exists() else 'no'}")
+
+
+@research_app.command("show")
+def research_show(
+    company_id: str = typer.Argument(..., help="Company id slug"),
+    output_dir: Path = typer.Option(_default_research_dir(), "--output-dir"),
+) -> None:
+    """Show final brief and important URLs for a company."""
+    from customer_discovery.storage.staged_jsonl import index_by_company
+    from customer_discovery.models.final import FinalBrief
+
+    finals = index_by_company(output_dir / "final_briefs.jsonl", FinalBrief)
+    fb = finals.get(company_id)
+    if not fb:
+        typer.echo(f"No final brief for {company_id}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"{fb.company_name} (score={fb.final_score}, stage={fb.final_stage})")
+    typer.echo(fb.summary)
+    typer.echo("\nImportant URLs:")
+    for u in fb.important_urls:
+        flag = " *" if u.used_in_reasoning else ""
+        typer.echo(f"  [{u.source_type}]{flag} {u.url}")
+        typer.echo(f"    {u.why_important}")
+
+
+def _default_outreach_dir() -> Path:
+    return _project_root() / "data" / "outreach"
+
+
+@outreach_app.callback(invoke_without_command=True)
+def outreach_main(
+    ctx: typer.Context,
+    leads: Path = typer.Option(
+        _default_research_dir() / "top_leads.csv",
+        "--leads",
+    ),
+    briefs: Path = typer.Option(
+        _default_research_dir() / "final_briefs.jsonl",
+        "--briefs",
+    ),
+    companies: Path = typer.Option(
+        _project_root() / "data" / "companies.jsonl",
+        "--companies",
+    ),
+    evidence: Path = typer.Option(
+        _default_research_dir() / "evidence_bundles.jsonl",
+        "--evidence",
+    ),
+    output_dir: Path = typer.Option(_default_outreach_dir(), "--output-dir"),
+    min_score: Optional[int] = typer.Option(None, "--min-score"),
+    top_n: Optional[int] = typer.Option(None, "--top-n"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-n"),
+    resume: bool = typer.Option(False, "--resume"),
+    company_id: Optional[str] = typer.Option(None, "--company-id"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    estimate_cost: bool = typer.Option(False, "--estimate-cost"),
+    include_manual_review: bool = typer.Option(False, "--include-manual-review"),
+    force_regenerate: bool = typer.Option(False, "--force-regenerate"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Generate outreach packs from research leads (default when no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _run_outreach(
+        leads=leads,
+        briefs=briefs,
+        companies=companies,
+        evidence=evidence,
+        output_dir=output_dir,
+        min_score=min_score,
+        top_n=top_n,
+        limit=limit,
+        resume=resume,
+        company_id=company_id,
+        dry_run=dry_run,
+        estimate_cost=estimate_cost,
+        include_manual_review=include_manual_review,
+        force_regenerate=force_regenerate,
+        verbose=verbose,
+    )
+
+
+def _run_outreach(**kwargs) -> None:
+    from customer_discovery.outreach.pipeline.orchestrator import (
+        OutreachOptions,
+        OutreachOrchestrator,
+    )
+
+    _setup_logging(kwargs.pop("verbose", False))
+    root = _project_root()
+    opts = OutreachOptions(
+        leads_path=kwargs["leads"],
+        briefs_path=kwargs["briefs"],
+        companies_path=kwargs["companies"],
+        evidence_path=kwargs["evidence"],
+        output_dir=kwargs["output_dir"],
+        cache_dir=root / "data" / "raw" / "outreach",
+        min_score=kwargs.get("min_score"),
+        top_n=kwargs.get("top_n"),
+        limit=kwargs.get("limit"),
+        company_id=kwargs.get("company_id"),
+        resume=kwargs.get("resume", False),
+        dry_run=kwargs.get("dry_run", False),
+        estimate_cost=kwargs.get("estimate_cost", False),
+        include_manual_review=kwargs.get("include_manual_review", False),
+        force_regenerate=kwargs.get("force_regenerate", False),
+    )
+    stats = OutreachOrchestrator(opts).run()
+    typer.echo(f"Outreach done. {stats}")
+
+
+@outreach_app.command("stats")
+def outreach_stats(
+    output_dir: Path = typer.Option(_default_outreach_dir(), "--output-dir"),
+) -> None:
+    """Summarize outreach outputs."""
+    from customer_discovery.storage.staged_jsonl import read_staged
+    from customer_discovery.models.outreach import OutreachPack
+
+    packs = read_staged(output_dir / "outreach_packs.jsonl", OutreachPack)
+    ready = sum(1 for p in packs if p.ready_to_send)
+    typer.echo(f"outreach_packs: {len(packs)}")
+    typer.echo(f"ready_to_send: {ready}")
+    typer.echo(f"outreach_queue.csv: {'yes' if (output_dir / 'outreach_queue.csv').exists() else 'no'}")
+
+
+@outreach_app.command("show")
+def outreach_show(
+    company_id: str = typer.Argument(...),
+    output_dir: Path = typer.Option(_default_outreach_dir(), "--output-dir"),
+) -> None:
+    """Show outreach pack for a company."""
+    from customer_discovery.storage.staged_jsonl import index_by_company
+    from customer_discovery.models.outreach import OutreachPack
+
+    packs = index_by_company(output_dir / "outreach_packs.jsonl", OutreachPack)
+    pack = packs.get(company_id)
+    if not pack:
+        typer.echo(f"No outreach pack for {company_id}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"{pack.company_name} (score={pack.final_score}, ready={pack.ready_to_send})")
+    typer.echo(f"\nContact: {pack.contact.name or '(lookup manually)'} — {pack.contact.persona}")
+    if pack.contact.linkedin_url:
+        typer.echo(f"LinkedIn: {pack.contact.linkedin_url}")
+    typer.echo(f"\nSubject: {pack.email_subject}\n")
+    typer.echo(pack.email_body or "")
+    typer.echo("\nLinkedIn note:")
+    typer.echo(pack.linkedin_connection_note or "")
+    typer.echo(f"\nAll scraped URLs ({len(pack.important_urls)}):")
+    for u in pack.important_urls:
+        flag = " *" if u.used_in_reasoning else ""
+        typer.echo(f"  [{u.source_type}]{flag} {u.url}")
 
 
 @app.command("schema")

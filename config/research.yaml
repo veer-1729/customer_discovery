@@ -1,0 +1,102 @@
+paths:
+  input: data/companies.jsonl
+  output_dir: data/research
+  raw_cache_dir: data/raw/research
+
+agentic_collection:
+  max_tool_calls_per_company: 20
+  request_timeout_seconds: 15
+  user_agent: CustomerDiscoveryBot/0.1 (+research)
+  careers_paths:
+    - /careers
+    - /jobs
+    - /join-us
+    - /company/careers
+    - /about/careers
+  docs_paths:
+    - /docs
+    - /developers
+    - /api
+    - /documentation
+  blog_paths:
+    - /blog
+    - /changelog
+    - /updates
+  status_paths:
+    - /status
+  weak_coverage_threshold: 2
+
+search:
+  enabled: true
+  provider: tavily
+  max_results_per_query: 5
+  max_queries_per_company: 5
+  max_pages_fetched_from_results: 5
+  general_queries:
+    - "{company_name} careers backend"
+    - "{company_name} API docs"
+    - "{company_name} on-call SRE"
+    - "{company_name} status page"
+    - "{company_name} developer documentation"
+
+careers_search:
+  enabled: true
+  max_search_queries: 8
+  max_pages_to_fetch: 5
+  queries:
+    - "{company_name} careers"
+    - "{company_name} jobs"
+    - "{company_name} hiring backend engineer"
+    - "{company_name} site:ashbyhq.com"
+    - "{company_name} site:lever.co"
+    - "{company_name} site:greenhouse.io"
+    - "{company_name} site:workable.com"
+    - "{company_name} site:ycombinator.com jobs"
+
+models:
+  fast_model: gpt-4o-mini
+  critic_model: gpt-4o-mini
+  premium_model: gpt-4o
+
+stages:
+  evidence_collection:
+    model: none
+  signal_extraction:
+    model: none
+  triage:
+    model: gpt-4o-mini
+    run_on: all
+  critic:
+    model: gpt-4o-mini
+    min_score: 60
+    labels:
+      - strong_candidate
+      - needs_review
+    max_revision_loops: 1
+  premium:
+    model: gpt-4o
+    top_n: 100
+    min_score: 70
+
+confidence_rules:
+  no_website_seed_only: low
+  homepage_only: low
+  two_source_types: medium
+  three_plus_types: high
+  homepage_careers_docs: high
+  fallback_only: medium
+
+scoring:
+  triage_blend:
+    deterministic_weight: 0.4
+    llm_weight: 0.6
+
+cost_estimates:
+  triage_input_tokens: 3500
+  triage_output_tokens: 800
+  critic_input_tokens: 4000
+  critic_output_tokens: 600
+  premium_input_tokens: 8000
+  premium_output_tokens: 2000
+
+max_workers: 4

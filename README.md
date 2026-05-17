@@ -430,11 +430,128 @@ pytest -v tests/test_cmu_filters.py tests/test_cmu_employee_size.py
 
 ---
 
-## What is not built yet (Parts 2–3)
+## Part 2: Deep research pipeline
 
-- Deep company research / ICP scoring (`ResearchBrief`)
-- Personalized outreach generation (`OutreachPack`)
+After scraping companies into `data/companies.jsonl`, run the multi-stage research funnel:
+
+```
+companies.jsonl → evidence → signals → triage (gpt-4o-mini, all)
+  → critic + one revision (gated) → premium (gpt-4o, top N) → final_briefs + top_leads.csv
+```
+
+### Setup
+
+```bash
+cp .env.example .env
+# Required for LLM stages:
+export OPENAI_API_KEY=sk-...
+# Optional for careers/search fallback (provider in config/research.yaml):
+export TAVILY_API_KEY=tvly-...
+pip install -e ".[dev]"
+```
+
+### Run research
+
+```bash
+# Evidence + signals + deterministic score only (no LLM cost)
+customer-discovery research --dry-run --limit 10
+
+# Full pipeline (pilot)
+customer-discovery research --limit 20 --resume
+
+# Cost estimate before a large run
+customer-discovery research --estimate-cost --limit 1000
+
+# Disable all search API calls
+customer-discovery research --no-fallback-search
+
+# Skip expensive stages during dev
+customer-discovery research --skip-critic --skip-premium
+```
+
+### Outputs (`data/research/`)
+
+| File | Content |
+|------|---------|
+| `evidence_bundles.jsonl` | Fetched pages + coverage |
+| `signals.jsonl` | Keyword signals + deterministic score |
+| `triage_briefs.jsonl` | LLM triage for every company |
+| `critiques.jsonl` / `reviewed_briefs.jsonl` | Critic + single revision |
+| `premium_briefs.jsonl` | Top-N deep briefs |
+| `final_briefs.jsonl` | Best stage per company + `important_urls` |
+| `top_leads.csv` | Ranked outreach table with URL columns |
+
+Raw HTML cache: `data/raw/research/{company_id}/`.
+
+### Inspect results
+
+```bash
+customer-discovery research stats
+customer-discovery research show acme-com
+```
+
+### Search providers
+
+Configured in `config/research.yaml` (`search.provider`). Supported: `tavily`, `serpapi`, `brave`, `bing`, `google_cse`, `openai`. Careers search runs only after homepage/path probes fail; never scrapes Google HTML directly.
+
+Product copy for prompts: `config/product.yaml` (Emergent Delta). ICP rubric: `config/icp.yaml`.
+
+---
+
+## Part 3: Outreach prep
+
+Turn ranked leads into email + LinkedIn drafts. Contacts are **seed-only** (from `companies.jsonl` team/LinkedIn); fill gaps manually.
+
+```bash
+customer-discovery outreach --dry-run          # gated lead count
+customer-discovery outreach --limit 20 --resume
+customer-discovery outreach stats
+customer-discovery outreach show COMPANY_ID
+```
+
+Outputs in `data/outreach/`:
+
+| File | Purpose |
+|------|---------|
+| `outreach_packs.jsonl` | Full `OutreachPack` per company |
+| `outreach_queue.csv` | Spreadsheet send queue + `all_scraped_urls` |
+
+`important_urls` on every brief/pack includes **all URLs** the evidence agent fetched (every `EvidenceItem` with a URL, plus trace-only attempts).
+
+---
+
+## End-to-end workflow
+
+```bash
+# 0. Setup
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env   # set OPENAI_API_KEY; optional TAVILY_API_KEY
+
+# 1. Scrape companies
+customer-discovery scrape --source yc --limit 50 --founders
+# or: customer-discovery scrape --source cmu --csv export.csv
+
+# 2. Research (evidence → rank)
+customer-discovery research --limit 50 --resume --no-fallback-search   # no search key
+# or full: customer-discovery research --limit 50 --resume
+
+# 3. Outreach drafts
+customer-discovery outreach --limit 20 --resume
+
+# 4. Review
+customer-discovery research show COMPANY_ID
+customer-discovery outreach show COMPANY_ID
+# Open data/outreach/outreach_queue.csv
+```
+
+---
+
+## What is not built yet
+
 - Live CMU grid scrape without CSV/API
+- Contact enrichment APIs (Apollo, etc.)
+- Automated email sending
 
 ---
 
@@ -455,4 +572,6 @@ For help on any command:
 ```bash
 customer-discovery scrape --help
 customer-discovery companies --help
+customer-discovery research --help
+customer-discovery outreach --help
 ```
