@@ -31,6 +31,14 @@ def append_staged(path: Path, record: BaseModel) -> None:
         f.write(record.model_dump_json() + "\n")
 
 
+def write_staged(path: Path, records: list[BaseModel]) -> None:
+    """Replace staged JSONL with records (one JSON object per line)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for record in records:
+            f.write(record.model_dump_json() + "\n")
+
+
 def index_by_company(path: Path, model: type[T]) -> dict[str, T]:
     return {getattr(r, "company_id"): r for r in read_staged(path, model)}
 

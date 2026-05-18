@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from customer_discovery.models.evidence import EvidenceBundle, EvidenceItem
 from customer_discovery.models.signals import ExtractedCompanySignals
+from customer_discovery.research.hardware_fit import (
+    has_ops_evidence,
+    has_substantive_docs_text,
+    is_hardware_heavy,
+)
 from customer_discovery.research.keywords import (
     B2B_KEYWORDS,
     CONSUMER_KEYWORDS,
@@ -19,7 +24,12 @@ def _text_for_types(items: list[EvidenceItem], types: set[str]) -> str:
     return " ".join(parts)
 
 
-def extract_signals(bundle: EvidenceBundle) -> ExtractedCompanySignals:
+def extract_signals(
+    bundle: EvidenceBundle,
+    *,
+    industries: list[str] | None = None,
+    company_description: str | None = None,
+) -> ExtractedCompanySignals:
     items = bundle.items
     all_text = " ".join(i.text_snippet for i in items if i.success)
     careers_text = _text_for_types(items, {"careers"})
@@ -35,7 +45,10 @@ def extract_signals(bundle: EvidenceBundle) -> ExtractedCompanySignals:
 
     likely_b2b = bool(B2B_KEYWORDS.search(homepage_text + docs_text))
     likely_consumer = bool(CONSUMER_KEYWORDS.search(homepage_text)) and not likely_b2b
-    has_api = has_docs_signal(docs_text) or "docs" in {i.source_type for i in items if i.success}
+    has_substantive_docs = has_substantive_docs_text(docs_text)
+    has_api = has_substantive_docs or (
+        has_docs_signal(docs_text) and len(docs_text.strip()) >= 200
+    )
     has_webhooks = "webhook" in docs_text.lower()
     has_integrations = "integration" in (docs_text + all_text).lower()
     has_status = bundle.coverage.status_found
@@ -44,7 +57,21 @@ def extract_signals(bundle: EvidenceBundle) -> ExtractedCompanySignals:
     hiring_infra = hiring_platform or "sre" in careers_text.lower()
     on_call = bool(ON_CALL_KEYWORDS.search(careers_text + all_text))
     incident = "incident" in all_text.lower()
-    production_critical = likely_b2b and (has_api or has_status or on_call)
+    ops_evidence = has_ops_evidence(
+        mentions_on_call=on_call,
+        has_substantive_docs=has_substantive_docs,
+    )
+    production_critical = likely_b2b and ops_evidence
+
+    seed_text = _text_for_types(items, {"seed_metadata"})
+    hardware_heavy = is_hardware_heavy(
+        industries=industries or [],
+        homepage_text=homepage_text,
+        description=company_description or "",
+        seed_text=seed_text,
+    )
+    if hardware_heavy:
+        negatives.append("hardware_heavy")
 
     if NEGATIVE_PRELAUNCH.search(homepage_text):
         negatives.append("pre_launch_signals")
@@ -74,6 +101,9 @@ def extract_signals(bundle: EvidenceBundle) -> ExtractedCompanySignals:
         mentions_on_call=on_call,
         mentions_incident_response=incident,
         likely_production_critical=production_critical,
+        hardware_heavy=hardware_heavy,
+        has_substantive_docs=has_substantive_docs,
+        has_ops_evidence=ops_evidence,
         negative_signals_detected=negatives,
         evidence_refs=refs,
     )

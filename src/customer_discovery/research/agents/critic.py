@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from customer_discovery.llm.validate import clamp_score
 
 from customer_discovery.models.critique import AdvisorCritique, ReviewedBrief
-from customer_discovery.models.evidence import EvidenceCoverage, cap_confidence
+from customer_discovery.models.evidence import EvidenceCoverage, cap_confidence, normalize_confidence
 from customer_discovery.models.signals import EvidenceBackedSignal
 from customer_discovery.models.triage import TriageBrief
 from customer_discovery.llm.client import LLMClient
@@ -35,6 +37,11 @@ class RevisionLLMOutput(BaseModel):
     personalized_hook: str | None = None
     discovery_question: str | None = None
     evidence_ids_used: list[str] = Field(default_factory=list)
+
+    @field_validator("reviewed_score", mode="before")
+    @classmethod
+    def _clamp_reviewed_score(cls, value: Any) -> int:
+        return clamp_score(value, default=50)
 
 
 CRITIC_SYSTEM = """You are a skeptical advisor reviewing a triage brief.
@@ -108,7 +115,7 @@ def run_revision(
     )
     score = max(0, min(100, triage.triage_score + critique.recommended_score_adjustment))
     score = max(score, out.reviewed_score)
-    conf = cap_confidence(out.confidence, coverage)  # type: ignore[arg-type]
+    conf = cap_confidence(normalize_confidence(out.confidence), coverage)
 
     def map_signals(rows: list[dict]) -> list[EvidenceBackedSignal]:
         return [

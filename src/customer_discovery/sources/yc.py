@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_module
 import json
 import logging
 import re
@@ -32,6 +33,9 @@ HEADERS = {
 }
 
 _algolia_headers: dict[str, str] | None = None
+
+# Algolia search API only returns the first 1_000 hits per query (nbHits can be higher).
+ALGOLIA_RETRIEVAL_LIMIT = 1000
 
 
 def _project_root() -> Path:
@@ -77,6 +81,43 @@ def algolia_query(
     resp = client.post(ALGOLIA_URL, params=headers, json=body, timeout=60.0)
     resp.raise_for_status()
     return resp.json()["results"][0]
+
+
+def plan_algolia_queries(
+    client: httpx.Client,
+    filter_config: YCFilterConfig,
+) -> list[YCFilterConfig]:
+    """Split filters so each Algolia query can return every matching company."""
+    if len(filter_config.batches) > 1:
+        log.info(
+            "Querying %d YC batches separately (Algolia caps at %d hits per query)",
+            len(filter_config.batches),
+            ALGOLIA_RETRIEVAL_LIMIT,
+        )
+        return [filter_config.with_single_batch(b) for b in filter_config.batches]
+
+    result = algolia_query(client, 0, filter_config)
+    nb_hits = int(result.get("nbHits") or 0)
+    page_hits = len(result.get("hits") or [])
+    nb_pages = int(result.get("nbPages") or 1)
+
+    if nb_hits <= ALGOLIA_RETRIEVAL_LIMIT and (page_hits >= nb_hits or nb_pages > 1):
+        return [filter_config]
+
+    if len(filter_config.regions) > 1:
+        log.info(
+            "Algolia reports %d hits but only %d are retrievable per query; splitting by region",
+            nb_hits,
+            ALGOLIA_RETRIEVAL_LIMIT,
+        )
+        return [filter_config.with_single_region(r) for r in filter_config.regions]
+
+    log.warning(
+        "Algolia reports %d hits but retrieval is capped at %d; results may be incomplete",
+        nb_hits,
+        ALGOLIA_RETRIEVAL_LIMIT,
+    )
+    return [filter_config]
 
 
 def algolia_facet_summary(
@@ -127,23 +168,86 @@ def hit_to_record(hit: dict[str, Any], program: str = "YC") -> CompanyRecord:
     return record
 
 
+def _founders_from_json_list(founders_data: list[Any]) -> list[TeamMember]:
+    founders: list[TeamMember] = []
+    for f in founders_data:
+        if not isinstance(f, dict):
+            continue
+        name = f.get("full_name") or f.get("name") or ""
+        if not str(name).strip():
+            continue
+        founders.append(
+            TeamMember(
+                name=str(name).strip(),
+                role=f.get("title"),
+                linkedin_url=f.get("linkedin_url") or f.get("linkedin"),
+                github_url=f.get("github_url") or f.get("github"),
+            )
+        )
+    return founders
+
+
 def _parse_founders_from_next_data(data: dict[str, Any]) -> list[TeamMember]:
     founders: list[TeamMember] = []
     try:
         props = data.get("props", {}).get("pageProps", {})
         company = props.get("company") or props.get("data", {}).get("company") or {}
-        for f in company.get("founders", []):
-            founders.append(
-                TeamMember(
-                    name=f.get("full_name", f.get("name", "")),
-                    role=f.get("title"),
-                    linkedin_url=f.get("linkedin_url") or f.get("linkedin"),
-                    github_url=f.get("github_url") or f.get("github"),
-                )
-            )
+        founders = _founders_from_json_list(company.get("founders", []))
     except Exception:
         pass
     return founders
+
+
+def _extract_json_array(text: str, start: int) -> str | None:
+    """Return substring for a JSON array starting at text[start] == '['."""
+    if start < 0 or start >= len(text) or text[start] != "[":
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _parse_founders_from_rsc_html(html: str) -> list[TeamMember]:
+    """Parse founders from YC's current RSC-embedded JSON (no __NEXT_DATA__)."""
+    decoded = html_module.unescape(html)
+    for key in ('"founders":', '"active_founders":'):
+        idx = decoded.find(key)
+        if idx < 0:
+            continue
+        arr_start = decoded.find("[", idx)
+        if arr_start < 0:
+            continue
+        blob = _extract_json_array(decoded, arr_start)
+        if not blob:
+            continue
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            founders = _founders_from_json_list(data)
+            if founders:
+                return founders
+    return []
 
 
 def scrape_founders_for_slug(client: httpx.Client, slug: str) -> list[TeamMember]:
@@ -161,7 +265,7 @@ def scrape_founders_for_slug(client: httpx.Client, slug: str) -> list[TeamMember
                 return founders
         except json.JSONDecodeError:
             pass
-    return []
+    return _parse_founders_from_rsc_html(resp.text)
 
 
 @register_source("yc")
@@ -176,6 +280,7 @@ class YCSource(CompanySource):
     ) -> AsyncIterator[CompanyRecord]:
         filter_config: YCFilterConfig = options["filter_config"]
         fetch_founders: bool = options.get("fetch_founders", False)
+        skip_founder_slugs: set[str] = set(options.get("skip_founder_slugs") or [])
         rate_limit_rps: float = options.get("rate_limit_rps", 1.5)
         delay = 1.0 / rate_limit_rps if rate_limit_rps > 0 else 0
 
@@ -183,25 +288,37 @@ class YCSource(CompanySource):
         count = 0
 
         with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
-            page = 0
-            while True:
-                result = algolia_query(client, page, filter_config)
-                hits = result.get("hits", [])
-                if not hits:
-                    break
+            sub_queries = plan_algolia_queries(client, filter_config)
+            seen_object_ids: set[str] = set()
 
-                for hit in hits:
-                    record = hit_to_record(hit, program=program)
-                    if fetch_founders and hit.get("slug"):
-                        time.sleep(delay)
-                        record.team = scrape_founders_for_slug(client, hit["slug"])
-                    yield record
-                    count += 1
-                    if limit is not None and count >= limit:
-                        return
+            for sub_fc in sub_queries:
+                page = 0
+                while True:
+                    result = algolia_query(client, page, sub_fc)
+                    hits = result.get("hits", [])
+                    if not hits:
+                        break
 
-                nb_pages = result.get("nbPages", 1)
-                page += 1
-                if page >= nb_pages:
-                    break
-                time.sleep(delay)
+                    for hit in hits:
+                        oid = str(hit.get("objectID") or hit.get("slug") or "")
+                        if oid and oid in seen_object_ids:
+                            continue
+                        if oid:
+                            seen_object_ids.add(oid)
+
+                        record = hit_to_record(hit, program=program)
+                        slug = hit.get("slug")
+                        if fetch_founders and slug and slug not in skip_founder_slugs:
+                            time.sleep(delay)
+                            record.team = scrape_founders_for_slug(client, slug)
+                            record.raw["founders_page_fetched"] = True
+                        yield record
+                        count += 1
+                        if limit is not None and count >= limit:
+                            return
+
+                    nb_pages = int(result.get("nbPages") or 1)
+                    page += 1
+                    if page >= nb_pages:
+                        break
+                    time.sleep(delay)

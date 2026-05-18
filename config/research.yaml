@@ -1,6 +1,6 @@
 paths:
-  input: data/companies.jsonl
-  output_dir: data/research
+  input: data/companies_yc_2020_2027.jsonl
+  output_dir: data/research_yc_2020_2027
   raw_cache_dir: data/raw/research
 
 agentic_collection:
@@ -29,29 +29,32 @@ agentic_collection:
 search:
   enabled: true
   provider: tavily
+  fallback_providers:
+    - serpapi
+  stop_run_on_exhausted: false
   max_results_per_query: 5
   max_queries_per_company: 5
   max_pages_fetched_from_results: 5
   general_queries:
-    - "{company_name} careers backend"
-    - "{company_name} API docs"
-    - "{company_name} on-call SRE"
-    - "{company_name} status page"
-    - "{company_name} developer documentation"
+    - "site:{company_domain} careers"
+    - "site:{company_domain} docs OR api"
+    - "site:{company_domain} status"
+    - "site:{company_domain} blog OR changelog"
+    - "{company_name} site:{company_domain} engineering"
 
 careers_search:
   enabled: true
   max_search_queries: 8
   max_pages_to_fetch: 5
   queries:
-    - "{company_name} careers"
-    - "{company_name} jobs"
-    - "{company_name} hiring backend engineer"
+    - "site:{company_domain} careers"
+    - "site:{company_domain} jobs"
+    - "{company_name} site:{company_domain} hiring"
     - "{company_name} site:ashbyhq.com"
     - "{company_name} site:lever.co"
     - "{company_name} site:greenhouse.io"
     - "{company_name} site:workable.com"
-    - "{company_name} site:ycombinator.com jobs"
+    - "site:ycombinator.com/companies/{yc_slug}"
 
 models:
   fast_model: gpt-4o-mini
@@ -69,6 +72,7 @@ stages:
   critic:
     model: gpt-4o-mini
     min_score: 60
+    top_n: 200
     labels:
       - strong_candidate
       - needs_review
@@ -77,6 +81,7 @@ stages:
     model: gpt-4o
     top_n: 100
     min_score: 70
+    require_evidence_quality: true
 
 confidence_rules:
   no_website_seed_only: low
@@ -90,6 +95,9 @@ scoring:
   triage_blend:
     deterministic_weight: 0.4
     llm_weight: 0.6
+  hardware_penalty: 35
+  min_substantive_docs_chars: 400
+  premium_min_rich_sources: 3
 
 cost_estimates:
   triage_input_tokens: 3500

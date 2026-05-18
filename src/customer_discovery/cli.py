@@ -79,7 +79,11 @@ def scrape(
     source: str = typer.Option(..., "--source", "-s", help="Source id: yc, cmu"),
     output: Path = typer.Option(default_output_path(), "--output", "-o"),
     limit: Optional[int] = typer.Option(None, "--limit", "-n"),
-    resume: bool = typer.Option(False, "--resume", help="Skip companies already in output"),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Skip companies already in output; with --founders, skip founder fetch when team exists",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview filters (no write)"),
     founders: bool = typer.Option(False, "--founders", help="Scrape YC founder pages (slow)"),
     from_url: Optional[str] = typer.Option(
@@ -162,10 +166,16 @@ def scrape(
             source_options=source_options,
         )
     )
-    typer.echo(
+    msg = (
         f"Done. Total in {output}: {stats['total']} "
-        f"(added {stats['added_this_run']}, skipped {stats['skipped_resume']})"
+        f"(added {stats['added_this_run']}, skipped {stats['skipped_resume']}"
     )
+    if stats.get("updated_team_this_run"):
+        msg += f", team backfilled {stats['updated_team_this_run']}"
+    if stats.get("skipped_founder_fetch"):
+        msg += f", founder fetch skipped for {stats['skipped_founder_fetch']} slugs"
+    msg += ")"
+    typer.echo(msg)
 
 
 def _build_cmu_filters(
@@ -358,6 +368,11 @@ def research_main(
     no_fallback_search: bool = typer.Option(False, "--no-fallback-search"),
     estimate_cost: bool = typer.Option(False, "--estimate-cost"),
     force_refetch: bool = typer.Option(False, "--force-refetch"),
+    force_search: bool = typer.Option(
+        False,
+        "--force-search",
+        help="Ignore search_state.json and retry web search even if credits were exhausted",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run the full research pipeline (default when no subcommand)."""
@@ -376,6 +391,7 @@ def research_main(
         no_fallback_search=no_fallback_search,
         estimate_cost=estimate_cost,
         force_refetch=force_refetch,
+        force_search=force_search,
         verbose=verbose,
     )
 
@@ -398,6 +414,7 @@ def _run_research(**kwargs) -> None:
         no_fallback_search=kwargs.get("no_fallback_search", False),
         estimate_cost=kwargs.get("estimate_cost", False),
         force_refetch=kwargs.get("force_refetch", False),
+        force_search=kwargs.get("force_search", False),
     )
     stats = ResearchOrchestrator(opts).run()
     typer.echo(

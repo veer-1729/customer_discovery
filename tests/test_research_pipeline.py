@@ -61,3 +61,15 @@ def test_cost_estimate():
     est = estimate_run_cost(100, {"cost_estimates": {}, "models": {}, "stages": {"premium": {"top_n": 50}}})
     assert est["companies"] == 100
     assert "total" in est["estimated_usd"]
+
+
+def test_cost_estimate_critic_top_n():
+    est = estimate_run_cost(
+        500,
+        {
+            "cost_estimates": {},
+            "models": {},
+            "stages": {"critic": {"top_n": 200, "min_score": 60}, "premium": {"top_n": 100}},
+        },
+    )
+    assert est["critic_calls"] == 400

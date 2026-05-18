@@ -23,6 +23,9 @@ class ExtractedCompanySignals(BaseModel):
     mentions_on_call: bool = False
     mentions_incident_response: bool = False
     likely_production_critical: bool = False
+    hardware_heavy: bool = False
+    has_substantive_docs: bool = False
+    has_ops_evidence: bool = False
     negative_signals_detected: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     raw_keywords: dict[str, list[str]] = Field(default_factory=dict)

@@ -17,10 +17,10 @@ from customer_discovery.outreach.pipeline.queue_export import write_outreach_que
 from customer_discovery.research.config import load_product_config
 from customer_discovery.research.pipeline.url_catalog import build_important_urls
 from customer_discovery.storage.staged_jsonl import (
-    append_staged,
     index_by_company,
     load_ids_staged,
     read_staged,
+    write_staged,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,12 +90,14 @@ class OutreachOrchestrator:
             if self.opts.evidence_path.exists()
             else {}
         )
-        done = load_ids_staged(self.packs_path, OutreachPack) if self.opts.resume else set()
+        pack_index: dict[str, OutreachPack] = index_by_company(self.packs_path, OutreachPack)
+        if not self.opts.resume and not self.opts.force_regenerate:
+            pack_index = {}
         linkedin_max = int(self.cfg.get("linkedin_max_chars", 300))
-        premium_top = int(self.cfg.get("models", {}).get("premium_top_n", 20))
+        premium_top = int(self.cfg.get("models", {}).get("premium_top_n", 0))
 
         for i, lead in enumerate(leads):
-            if lead.company_id in done and not self.opts.force_regenerate:
+            if lead.company_id in pack_index and not self.opts.force_regenerate:
                 continue
             brief = lead.brief
             bundle = bundles.get(lead.company_id)
@@ -110,7 +112,7 @@ class OutreachOrchestrator:
             persona = brief.best_contact_persona
             contact = select_contact(lead.company, persona, self.cfg)
             model = self.cfg.get("models", {}).get("default", "gpt-4o-mini")
-            if i < premium_top:
+            if premium_top > 0 and i < premium_top:
                 model = self.cfg.get("models", {}).get("premium_model", model)
 
             pack = run_outreach_agent(
@@ -124,10 +126,11 @@ class OutreachOrchestrator:
                 linkedin_max_chars=linkedin_max,
                 rank=lead.rank,
             )
-            append_staged(self.packs_path, pack)
+            pack_index[lead.company_id] = pack
             self._write_cache(lead.company_id, pack)
 
-        all_packs = read_staged(self.packs_path, OutreachPack)
+        all_packs = sorted(pack_index.values(), key=lambda p: p.rank or 9999)
+        write_staged(self.packs_path, all_packs)
         write_outreach_queue(self.queue_path, all_packs)
         stats["packs_written"] = len(all_packs)
         return stats

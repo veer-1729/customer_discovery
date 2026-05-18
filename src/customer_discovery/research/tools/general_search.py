@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from customer_discovery.research.keywords import has_careers_signal, has_docs_signal
 from customer_discovery.research.tools.base import ToolContext, fetch_page, make_item
-from customer_discovery.research.tools.search_fallback import SearchFallbackTool
+from customer_discovery.research.tools.search_queries import run_filtered_search
 
 
 def run_agent_search_fallback(ctx: ToolContext, coverage_types: int) -> None:
@@ -22,11 +22,9 @@ def run_agent_search_fallback(ctx: ToolContext, coverage_types: int) -> None:
     for template in templates:
         if queries_run >= max_q:
             break
-        query = template.format(company_name=ctx.company_name)
+        results = run_filtered_search(ctx, template, max_results)
         queries_run += 1
-        try:
-            results = SearchFallbackTool.search(query, max_results)
-        except Exception:
+        if not results:
             continue
         for sr in results:
             ctx.items.append(

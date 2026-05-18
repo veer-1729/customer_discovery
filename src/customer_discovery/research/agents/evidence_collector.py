@@ -28,8 +28,15 @@ def collect_evidence(
     raw_cache_dir: Path,
     search_enabled: bool = True,
     force_refetch: bool = False,
+    search_state_dir: Path | None = None,
+    force_search: bool = False,
 ) -> EvidenceBundle:
-    SearchFallbackTool.configure(cfg, enabled=search_enabled)
+    SearchFallbackTool.configure(
+        cfg,
+        enabled=search_enabled,
+        state_dir=search_state_dir,
+        force_search=force_search,
+    )
     ac = cfg.get("agentic_collection", {})
     fetcher = PageFetcher(
         timeout=float(ac.get("request_timeout_seconds", 15)),

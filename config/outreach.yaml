@@ -18,7 +18,7 @@ gates:
 models:
   default: gpt-4o-mini
   premium_model: gpt-4o
-  premium_top_n: 20
+  premium_top_n: 0  # 0 = always use default (mini) for outreach drafts
 
 contact:
   mode: seed_only

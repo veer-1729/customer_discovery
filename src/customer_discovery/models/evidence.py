@@ -157,9 +157,40 @@ def _confidence_cap(
     return "low"
 
 
-def cap_confidence(requested: ConfidenceLevel, coverage: EvidenceCoverage) -> ConfidenceLevel:
+_CONFIDENCE_ALIASES: dict[str, ConfidenceLevel] = {
+    "moderate": "medium",
+    "med": "medium",
+    "mid": "medium",
+    "average": "medium",
+    "strong": "high",
+    "weak": "low",
+}
+
+
+def normalize_confidence(
+    value: str | None,
+    *,
+    default: ConfidenceLevel = "low",
+) -> ConfidenceLevel:
+    """Map LLM free-text confidence to low | medium | high."""
+    if not value:
+        return default
+    v = value.strip().lower()
+    if v in ("low", "medium", "high"):
+        return v  # type: ignore[return-value]
+    return _CONFIDENCE_ALIASES.get(v, default)
+
+
+def cap_confidence(
+    requested: ConfidenceLevel | str,
+    coverage: EvidenceCoverage,
+) -> ConfidenceLevel:
     order = {"low": 0, "medium": 1, "high": 2}
+    requested_norm = normalize_confidence(
+        requested if isinstance(requested, str) else requested,
+        default="low",
+    )
     cap = coverage.confidence_cap
-    if order[requested] <= order[cap]:
-        return requested
+    if order[requested_norm] <= order[cap]:
+        return requested_norm
     return cap

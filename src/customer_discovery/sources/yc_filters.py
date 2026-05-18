@@ -5,6 +5,20 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+_SEASONS_LEGACY = ("Winter", "Summer")
+_SEASONS_MODERN = ("Winter", "Summer", "Spring", "Fall")
+_MODERN_BATCHES_FROM_YEAR = 2025
+
+
+def yc_batches_for_year_range(start: int, end: int) -> list[str]:
+    """Build Algolia batch facet labels for inclusive year range (newest first)."""
+    batches: list[str] = []
+    for year in range(end, start - 1, -1):
+        seasons = _SEASONS_MODERN if year >= _MODERN_BATCHES_FROM_YEAR else _SEASONS_LEGACY
+        for season in seasons:
+            batches.append(f"{season} {year}")
+    return batches
+
 
 @dataclass
 class YCFilterConfig:
@@ -136,3 +150,25 @@ class YCFilterConfig:
             params["numericFilters"] = json.dumps(numeric)
 
         return params
+
+    def with_single_batch(self, batch: str) -> YCFilterConfig:
+        return YCFilterConfig(
+            batches=[batch],
+            regions=list(self.regions),
+            industries=list(self.industries),
+            statuses=list(self.statuses),
+            team_size_min=self.team_size_min,
+            team_size_max=self.team_size_max,
+            query=self.query,
+        )
+
+    def with_single_region(self, region: str) -> YCFilterConfig:
+        return YCFilterConfig(
+            batches=list(self.batches),
+            regions=[region],
+            industries=list(self.industries),
+            statuses=list(self.statuses),
+            team_size_min=self.team_size_min,
+            team_size_max=self.team_size_max,
+            query=self.query,
+        )

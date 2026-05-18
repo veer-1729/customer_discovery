@@ -16,7 +16,13 @@ def test_triage_with_mock_llm():
         coverage=EvidenceCoverage(confidence_cap="medium", homepage_found=True),
         trace=ResearchTrace(),
     )
-    signals = ExtractedCompanySignals(company_id="c", company_name="C", likely_b2b=True)
+    signals = ExtractedCompanySignals(
+        company_id="c",
+        company_name="C",
+        likely_b2b=True,
+        has_ops_evidence=True,
+        has_substantive_docs=True,
+    )
     det = DeterministicFitScore(company_id="c", score=65)
     company = CompanyRecord(id="c", name="C", website="https://c.com", source="yc")
     llm = MockLLMClient(
@@ -24,7 +30,7 @@ def test_triage_with_mock_llm():
             "TriageLLMOutput": {
                 "initial_fit_label": "strong_candidate",
                 "summary": "B2B API company",
-                "llm_score": 72,
+                "llm_score": 85,
                 "confidence": "medium",
                 "positive_signals": [{"claim": "API docs", "evidence_ids": []}],
                 "negative_signals": [],

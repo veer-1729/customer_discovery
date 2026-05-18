@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from customer_discovery.models.company import CompanyRecord
-from customer_discovery.models.evidence import EvidenceItem, compute_coverage, new_evidence_id
+from customer_discovery.models.evidence import (
+    EvidenceCoverage,
+    EvidenceItem,
+    cap_confidence,
+    compute_coverage,
+    new_evidence_id,
+    normalize_confidence,
+)
 from customer_discovery.research.agents.signal_extractor import extract_signals
 from customer_discovery.models.evidence import EvidenceBundle, EvidenceCoverage, ResearchTrace
 from customer_discovery.research.keywords import has_careers_signal, has_docs_signal
@@ -37,7 +44,11 @@ def test_extract_signals_on_call_and_api():
         company_name="Acme",
         items=[
             _item("careers", "Platform engineer on-call incident response"),
-            _item("docs", "API reference webhooks OAuth"),
+            _item(
+                "docs",
+                "API reference documentation for REST endpoints, webhooks, OAuth, "
+                "and SDK integration guides for developers. " * 8,
+            ),
         ],
         coverage=EvidenceCoverage(),
         trace=ResearchTrace(),
@@ -46,6 +57,17 @@ def test_extract_signals_on_call_and_api():
     assert sig.hiring_platform
     assert sig.mentions_on_call
     assert sig.has_api_docs
+
+
+def test_normalize_confidence_aliases():
+    assert normalize_confidence("moderate") == "medium"
+    assert normalize_confidence("HIGH") == "high"
+    assert normalize_confidence("unknown", default="low") == "low"
+
+
+def test_cap_confidence_accepts_moderate_alias():
+    cov = EvidenceCoverage(confidence_cap="high")
+    assert cap_confidence("moderate", cov) == "medium"
 
 
 def test_keyword_helpers():

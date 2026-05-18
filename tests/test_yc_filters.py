@@ -1,6 +1,6 @@
 import json
 
-from customer_discovery.sources.yc_filters import YCFilterConfig
+from customer_discovery.sources.yc_filters import YCFilterConfig, yc_batches_for_year_range
 
 
 def test_from_url_parses_batches_and_regions():
@@ -32,6 +32,17 @@ def test_build_algolia_facet_filters_or_within_group():
     numeric = json.loads(params["numericFilters"])
     assert "team_size>=1" in numeric
     assert "team_size<=25" in numeric
+
+
+def test_yc_batches_for_year_range():
+    batches = yc_batches_for_year_range(2020, 2027)
+    assert batches[0] == "Winter 2027"
+    assert "Winter 2020" in batches
+    assert "Summer 2020" in batches
+    assert "Spring 2025" in batches
+    assert "Fall 2025" in batches
+    assert "Spring 2024" not in batches
+    assert len(batches) == 22
 
 
 def test_merge_overrides_replaces_batches():

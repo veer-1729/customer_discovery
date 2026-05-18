@@ -18,9 +18,12 @@ def score_fit(
     if signals.likely_b2b:
         score += 20
         positive.append("b2b_or_devtools_signal")
-    if signals.has_api_docs:
+    if signals.has_substantive_docs:
         score += 15
-        positive.append("api_docs_surface")
+        positive.append("substantive_api_docs")
+    elif signals.has_api_docs:
+        score += 5
+        positive.append("thin_or_unverified_docs_path")
     if signals.has_integrations or signals.has_webhooks:
         score += 10
         positive.append("integrations_or_webhooks")
@@ -36,10 +39,15 @@ def score_fit(
     if signals.likely_production_critical:
         score += 10
         positive.append("likely_production_critical")
+    if signals.has_ops_evidence:
+        positive.append("ops_surface_confirmed")
     if company.batch or company.source in ("yc", "cmu"):
         score += 10
         positive.append("ideal_stage_metadata")
 
+    if signals.hardware_heavy:
+        score -= 35
+        negative.append("hardware_heavy")
     if "pre_launch_signals" in signals.negative_signals_detected:
         score -= 20
         negative.append("pre_launch")
@@ -52,6 +60,9 @@ def score_fit(
     if not bundle.website or bundle.coverage.total_successful_sources <= 1:
         score -= 10
         negative.append("weak_public_evidence")
+    if not signals.has_ops_evidence:
+        score -= 15
+        negative.append("no_on_call_or_substantive_docs")
 
     score = max(0, min(100, score))
     return DeterministicFitScore(

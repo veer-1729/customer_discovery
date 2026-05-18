@@ -48,7 +48,14 @@ def build_triage_user_payload(
             "coverage": bundle.coverage.model_dump(),
             "evidence": evidence_digest(bundle),
             "product": product,
+            "product_disqualifiers": product.get("disqualifiers", []),
+            "ideal_customer": product.get("ideal_customer", []),
             "icp_rubric": icp.get("prompt_rubric", ""),
+            "scoring_notes": (
+                "Penalize hardware-heavy / physical-product companies unless evidence shows "
+                "a software platform with APIs or on-call. Do not score strong_candidate "
+                "without on-call language or substantive developer docs in evidence."
+            ),
         },
         indent=2,
     )

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from customer_discovery.llm.validate import clamp_score
 
 from customer_discovery.models.company import CompanyRecord
 from customer_discovery.models.critique import ReviewedBrief
-from customer_discovery.models.evidence import EvidenceBundle, cap_confidence
+from customer_discovery.models.evidence import EvidenceBundle, cap_confidence, normalize_confidence
 from customer_discovery.models.premium import PremiumBrief, UrlNote
 from customer_discovery.models.signals import EvidenceBackedSignal
 from customer_discovery.models.triage import TriageBrief
@@ -35,9 +37,15 @@ class PremiumLLMOutput(BaseModel):
     url_notes: list[dict] = Field(default_factory=list)
     review_warnings: list[str] = Field(default_factory=list)
 
+    @field_validator("premium_score", mode="before")
+    @classmethod
+    def _clamp_premium_score(cls, value: Any) -> int:
+        return clamp_score(value, default=75)
+
 
 PREMIUM_SYSTEM = """You are a senior research analyst preparing outreach-ready briefs.
-Be specific, evidence-backed, and technical. Cite evidence_ids. Output JSON only."""
+Be specific, evidence-backed, and technical. Cite evidence_ids.
+premium_score must be an integer from 0 to 100. Output JSON only."""
 
 
 def run_premium(
@@ -91,7 +99,7 @@ def run_premium(
         for n in out.url_notes
         if n.get("url")
     ]
-    conf = cap_confidence(out.confidence, bundle.coverage)  # type: ignore[arg-type]
+    conf = cap_confidence(normalize_confidence(out.confidence), bundle.coverage)
     label = out.fit_label if out.fit_label in ("skip", "maybe", "strong_candidate", "needs_review") else "strong_candidate"
 
     return PremiumBrief(

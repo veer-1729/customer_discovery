@@ -10,6 +10,16 @@ PRICING = {
 }
 
 
+def _critic_call_count(n_companies: int, cfg: dict[str, Any]) -> int:
+    stage = cfg.get("stages", {}).get("critic", {})
+    top_n = stage.get("top_n")
+    if top_n is not None:
+        min_score = int(stage.get("min_score", 60))
+        # Upper bound: at most top_n companies with score >= min_score get critic+revision
+        return min(int(top_n), n_companies) * 2
+    return int(n_companies * 0.3) * 2
+
+
 def estimate_run_cost(
     n_companies: int,
     cfg: dict[str, Any],
@@ -34,7 +44,12 @@ def estimate_run_cost(
     premium_model = models.get("premium_model", "gpt-4o")
 
     triage_calls = n_companies
-    critic_calls = 0 if skip_critic else int(n_companies * critic_fraction) * 2
+    if skip_critic:
+        critic_calls = 0
+    elif cfg.get("stages", {}).get("critic", {}).get("top_n") is not None:
+        critic_calls = _critic_call_count(n_companies, cfg)
+    else:
+        critic_calls = int(n_companies * critic_fraction) * 2
     premium_calls = 0 if skip_premium else min(premium_top, n_companies)
 
     def cost(model: str, calls: int, tin: int, tout: int) -> float:

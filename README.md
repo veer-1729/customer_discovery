@@ -122,7 +122,7 @@ Only `data/.gitkeep` is tracked; pipeline outputs stay local.
 | `--verbose` | `-v` | Debug logging |
 | `--from-url` | | Paste a pre-filtered YC or Airtable URL (see below) |
 
-**Resume + dedup:** Companies are deduplicated by website domain (fallback: normalized name). Re-running with `--resume` skips existing IDs but still merges new sources into the same file.
+**Resume + dedup:** Companies are deduplicated by website domain (fallback: normalized name). Re-running with `--resume` skips existing IDs but still merges new sources into the same file. With `--founders`, founder pages are not re-fetched when `team` is already stored (see above).
 
 ---
 
@@ -141,11 +141,18 @@ Uses the [YC Startup Directory](https://www.ycombinator.com/companies) Algolia A
 | `--team-size-min` | | Min team size (integer). **Must use with `--team-size-max`** |
 | `--team-size-max` | | Max team size (integer) |
 | `--founders` | | Scrape each `/companies/{slug}` page for founder names/titles/LinkedIn (slow) |
+| `--resume` | | Skip companies already in output; with `--founders`, **skip founder HTTP** when `team` is already populated |
+
+**`--founders` + `--resume`:** Skips `/companies/{slug}` HTTP when that company already has `team` data or `raw.founders_page_fetched: true`. New companies still get founders; existing rows missing founders get **backfilled** on the next run.
+
+**Note:** YC no longer exposes `__NEXT_DATA__`; founder names are parsed from embedded RSC JSON. If an earlier run fetched founder pages but `team` is empty in `companies.jsonl`, run once more with `--founders --resume` to backfill names—then later runs skip those HTTP calls.
 | `--from-url` | | Full YC directory URL with query params (overrides default config filters) |
 
 ### Default YC filters
 
 If you pass **no** CLI filter flags, filters load from [`config/sources/yc.yaml`](config/sources/yc.yaml) (batches, regions, team size 1–25, etc.).
+
+**Algolia 1,000-hit cap:** `scrape --dry-run` may report ~1,700+ matches (`nbHits`), but Algolia only returns the **first 1,000** per query. With multiple batches in config, the scraper runs **one query per batch** so you get the full set (~1,715). If you previously scraped with an older build and only have 1,000 rows, run `scrape --source yc --resume` again (no `--limit`).
 
 **CLI flags replace** the corresponding lists from the config when provided (e.g. `--batch "Winter 2026"` replaces the entire batch list, it does not add to it).
 
@@ -552,6 +559,19 @@ pip install -e ".[dev]"
 | `--estimate-cost` | Print projected LLM cost |
 | `--force-refetch` | Ignore raw HTML cache |
 
+**Search relevance:** Tavily (and other search providers) filter results to the company’s **website domain**, known **ATS** hosts (Greenhouse, Lever, Ashby, etc.), or the company’s **YC page**. Homonym domains (e.g. AquaSec vs AquaShield) and job aggregators (Indeed, LinkedIn, Internshala) are skipped.
+
+### Verify evidence collection (link discovery + fetches)
+
+Probe the first N companies without LLM cost:
+
+```bash
+python scripts/probe_evidence.py --limit 3
+python scripts/probe_evidence.py --ids kelaicapital-com --with-search   # needs TAVILY_API_KEY
+```
+
+Shows homepage anchor counts, `known_links` buckets, each evidence URL/snippet size, coverage, and keyword signals. Flags thin SPA pages that matched only by URL path (e.g. `/careers` returning an empty shell).
+
 ### Run research
 
 ```bash
@@ -696,7 +716,7 @@ Before your first full (~1k company) run:
 | CMU requires `--csv` | Export CSV from Airtable or use `--api` |
 | YC team size error | Pass **both** `--team-size-min` and `--team-size-max` |
 | CMU filter matches nothing | Check exact field names (colons matter); try `--dry-run` |
-| `--resume` adds 0 companies | All IDs already in output; normal if list unchanged |
+| `--resume` adds 0 companies | All IDs already in output; normal if list unchanged. If dry-run shows ~1,700+ but file has only 1,000, upgrade and re-run `scrape --source yc --resume` (Algolia 1k cap; fixed by per-batch queries) |
 | Research stuck / slow | Use `--limit`; check network; raw cache under `data/raw/research/` |
 | `ready_to_send: false` in outreach | Add seed contact (`--founders` on scrape) or send manually after review |
 | SSL errors on `pip install` | Use system Python certs or env-specific pip trust flags |

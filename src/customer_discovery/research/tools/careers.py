@@ -4,7 +4,7 @@ from customer_discovery.research.fetch import build_url
 from customer_discovery.research.keywords import has_careers_signal
 from customer_discovery.research.tools.base import ToolContext, fetch_page, make_item
 from customer_discovery.research.tools.known_links import pick_links
-from customer_discovery.research.tools.search_fallback import SearchFallbackTool
+from customer_discovery.research.tools.search_queries import run_filtered_search
 
 
 def run_careers(ctx: ToolContext) -> None:
@@ -54,20 +54,10 @@ def _phase_b_search(ctx: ToolContext) -> None:
 
     fetched_urls: set[str] = set()
     for template in templates[:max_q]:
-        query = template.format(company_name=ctx.company_name)
-        try:
-            results = SearchFallbackTool.search(query, max_results)
-        except Exception as e:
-            ctx.items.append(
-                make_item(
-                    ctx,
-                    source_type="search_result",
-                    success=False,
-                    error=str(e),
-                    metadata={"query": query},
-                )
-            )
+        results = run_filtered_search(ctx, template, max_results)
+        if not results:
             continue
+        query = results[0].query_used
         for sr in results:
             ctx.items.append(
                 make_item(

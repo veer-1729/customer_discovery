@@ -13,12 +13,14 @@ from customer_discovery.models.premium import PremiumBrief
 from customer_discovery.models.signals import SignalRecord
 from customer_discovery.models.triage import TriageBrief
 from customer_discovery.research.agents.critic import run_critic, run_revision, should_run_critic
+from customer_discovery.research.tools.search_fallback import SearchFallbackTool
 from customer_discovery.research.agents.evidence_collector import collect_evidence
 from customer_discovery.research.agents.fit_scorer import score_fit
 from customer_discovery.research.agents.premium import run_premium
 from customer_discovery.research.agents.signal_extractor import extract_signals
 from customer_discovery.research.agents.triage import run_triage
 from customer_discovery.research.config import load_icp_config, load_product_config, load_research_config
+from customer_discovery.research.evidence_quality import qualifies_for_premium_llm
 from customer_discovery.research.pipeline.cost_estimate import estimate_run_cost
 from customer_discovery.research.pipeline.final_selector import select_final_brief
 from customer_discovery.research.pipeline.ranker import write_top_leads_csv
@@ -46,6 +48,7 @@ class ResearchOptions:
     top_n: int = 100
     no_fallback_search: bool = False
     force_refetch: bool = False
+    force_search: bool = False
     estimate_cost: bool = False
     verbose: bool = False
 
@@ -101,7 +104,17 @@ class ResearchOrchestrator:
             logger.info("Cost estimate: %s", est)
             print(est)
 
+        SearchFallbackTool.configure(
+            self.cfg,
+            enabled=not self.opts.no_fallback_search,
+            state_dir=self.opts.output_dir,
+            force_search=self.opts.force_search,
+        )
+
         for company in companies:
+            if self._should_stop_on_search_exhausted():
+                logger.warning("Stopping research run: search credits exhausted")
+                break
             self._process_company(company)
 
         self._finalize_all(companies)
@@ -118,6 +131,8 @@ class ResearchOrchestrator:
                 raw_cache_dir=self.opts.raw_cache_dir,
                 search_enabled=not self.opts.no_fallback_search,
                 force_refetch=self.opts.force_refetch,
+                search_state_dir=self.opts.output_dir,
+                force_search=self.opts.force_search,
             )
             append_staged(self.paths["evidence"], bundle)
             self.stats.evidence += 1
@@ -127,7 +142,11 @@ class ResearchOrchestrator:
             return
 
         if not (self.opts.resume and cid in load_ids_staged(self.paths["signals"], SignalRecord)):
-            signals = extract_signals(bundle)
+            signals = extract_signals(
+                bundle,
+                industries=company.industry,
+                company_description=company.description,
+            )
             det = score_fit(signals, bundle, company)
             rec = SignalRecord(
                 company_id=cid,
@@ -175,22 +194,22 @@ class ResearchOrchestrator:
         else:
             triage = triage_map[cid]
 
-        if self.opts.skip_critic:
-            self.stats.processed += 1
-            return
-
-        reviewed_map = index_by_company(self.paths["reviewed"], ReviewedBrief)
-        if should_run_critic(triage, self.cfg) and cid not in reviewed_map:
-            llm = self._get_llm()
-            model = self.cfg.get("models", {}).get("critic_model", "gpt-4o-mini")
-            critique = run_critic(triage, llm=llm, model=model)
-            append_staged(self.paths["critiques"], critique)
-            reviewed = run_revision(
-                triage, critique, llm=llm, model=model, coverage=bundle.coverage
-            )
-            append_staged(self.paths["reviewed"], reviewed)
-            self.stats.critic += 1
-            self.stats.reviewed += 1
+        if (
+            not self.opts.skip_critic
+            and self._critic_top_n() is None
+        ):
+            reviewed_map = index_by_company(self.paths["reviewed"], ReviewedBrief)
+            if should_run_critic(triage, self.cfg) and cid not in reviewed_map:
+                llm = self._get_llm()
+                model = self.cfg.get("models", {}).get("critic_model", "gpt-4o-mini")
+                critique = run_critic(triage, llm=llm, model=model)
+                append_staged(self.paths["critiques"], critique)
+                reviewed = run_revision(
+                    triage, critique, llm=llm, model=model, coverage=bundle.coverage
+                )
+                append_staged(self.paths["reviewed"], reviewed)
+                self.stats.critic += 1
+                self.stats.reviewed += 1
 
         self.stats.processed += 1
 
@@ -202,6 +221,11 @@ class ResearchOrchestrator:
         triage_map = index_by_company(self.paths["triage"], TriageBrief)
         reviewed_map = index_by_company(self.paths["reviewed"], ReviewedBrief)
         premium_map = index_by_company(self.paths["premium"], PremiumBrief)
+
+        if not self.opts.skip_critic and self._critic_top_n() is not None:
+            self._run_critic_stage(companies, triage_map, bundles)
+
+        reviewed_map = index_by_company(self.paths["reviewed"], ReviewedBrief)
 
         if not self.opts.skip_premium:
             self._run_premium_stage(companies, bundles, triage_map, reviewed_map, premium_map)
@@ -231,6 +255,61 @@ class ResearchOrchestrator:
         all_final = list(index_by_company(self.paths["final"], FinalBrief).values())
         write_top_leads_csv(self.paths["csv"], all_final, bundles)
 
+    def _critic_top_n(self) -> int | None:
+        stage = self.cfg.get("stages", {}).get("critic", {})
+        top_n = stage.get("top_n")
+        return int(top_n) if top_n is not None else None
+
+    def _should_stop_on_search_exhausted(self) -> bool:
+        if self.opts.no_fallback_search:
+            return False
+        if not self.cfg.get("search", {}).get("stop_run_on_exhausted", False):
+            return False
+        return SearchFallbackTool.search_exhausted()
+
+    def _run_critic_stage(
+        self,
+        companies: list[CompanyRecord],
+        triage_map: dict[str, TriageBrief],
+        bundles: dict[str, EvidenceBundle],
+    ) -> None:
+        top_n = self._critic_top_n()
+        if top_n is None:
+            return
+
+        stage = self.cfg.get("stages", {}).get("critic", {})
+        min_score = int(stage.get("min_score", 60))
+        reviewed_map = index_by_company(self.paths["reviewed"], ReviewedBrief)
+
+        eligible: list[tuple[int, CompanyRecord, TriageBrief]] = []
+        for company in companies:
+            triage = triage_map.get(company.id)
+            if not triage or triage.triage_score < min_score:
+                continue
+            eligible.append((triage.triage_score, company, triage))
+
+        eligible.sort(key=lambda x: -x[0])
+        selected = eligible[:top_n]
+
+        llm = self._get_llm()
+        model = self.cfg.get("models", {}).get("critic_model", "gpt-4o-mini")
+
+        for _, company, triage in selected:
+            cid = company.id
+            if cid in reviewed_map:
+                continue
+            bundle = bundles.get(cid)
+            if not bundle:
+                continue
+            critique = run_critic(triage, llm=llm, model=model)
+            append_staged(self.paths["critiques"], critique)
+            reviewed = run_revision(
+                triage, critique, llm=llm, model=model, coverage=bundle.coverage
+            )
+            append_staged(self.paths["reviewed"], reviewed)
+            self.stats.critic += 1
+            self.stats.reviewed += 1
+
     def _run_premium_stage(
         self,
         companies: list[CompanyRecord],
@@ -257,8 +336,19 @@ class ResearchOrchestrator:
             critiques = index_by_company(self.paths["critiques"], AdvisorCritique)
             crit = critiques.get(cid)
             advance = crit.should_advance_to_premium if crit else False
-            if score >= min_score or advance:
-                candidates.append((score, company, brief))
+            if score < min_score and not advance:
+                continue
+            sig_rec = index_by_company(self.paths["signals"], SignalRecord).get(cid)
+            bundle = bundles.get(cid)
+            if not sig_rec or not bundle:
+                continue
+            if not qualifies_for_premium_llm(bundle, sig_rec.signals):
+                logger.debug(
+                    "Skip premium %s (evidence quality / hardware gate)",
+                    cid,
+                )
+                continue
+            candidates.append((score, company, brief))
 
         candidates.sort(key=lambda x: -x[0])
         llm = self._get_llm()
@@ -269,6 +359,8 @@ class ResearchOrchestrator:
                 continue
             sig_rec = index_by_company(self.paths["signals"], SignalRecord).get(company.id)
             if not sig_rec:
+                continue
+            if not qualifies_for_premium_llm(bundle, sig_rec.signals):
                 continue
             from customer_discovery.models.scoring import DeterministicFitScore
 
