@@ -13,6 +13,12 @@ LINK_PATTERNS: dict[str, re.Pattern[str]] = {
     "status": re.compile(r"status|uptime|health", re.I),
     "github": re.compile(r"github\.com", re.I),
     "blog": re.compile(r"blog|news|changelog|updates", re.I),
+    "team": re.compile(r"\bteam\b|about-?us|our-?people|leadership|founders?", re.I),
+    "pricing": re.compile(r"pricing|plans?|subscribe", re.I),
+    "features": re.compile(r"features?|product|platform|solutions?", re.I),
+    "contact": re.compile(r"contact|get-?in-?touch|reach-?us", re.I),
+    "faq": re.compile(r"\bfaq\b|frequently-?asked|help-?center|support", re.I),
+    "services": re.compile(r"services?|offerings?|what-we-do", re.I),
 }
 
 

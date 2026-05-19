@@ -24,6 +24,29 @@ agentic_collection:
     - /updates
   status_paths:
     - /status
+  site_paths:
+    - /team
+    - /about
+    - /about-us
+    - /company
+    - /pricing
+    - /plans
+    - /features
+    - /product
+    - /services
+    - /contact
+    - /contact-us
+    - /faq
+    - /help
+    - /#team
+    - /#about
+    - /#pricing
+    - /#features
+    - /#services
+    - /#contact
+    - /#faq
+  max_site_page_fetches: 8
+  min_site_page_chars: 80
   weak_coverage_threshold: 2
 
 search:
@@ -72,7 +95,7 @@ stages:
   critic:
     model: gpt-4o-mini
     min_score: 60
-    top_n: 200
+    top_n: 120
     labels:
       - strong_candidate
       - needs_review

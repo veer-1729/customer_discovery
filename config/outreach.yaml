@@ -12,7 +12,7 @@ gates:
     - high
   exclude_fit_labels:
     - skip
-  exclude_manual_review: true
+  exclude_manual_review: false
   top_n: 100
 
 models:

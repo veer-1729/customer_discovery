@@ -66,6 +66,9 @@ def test_known_links_buckets_fixture_nav(acme_company: CompanyRecord, tmp_path: 
     assert any("status.acme.com" in u for u in d["status"])
     assert any("github.com/acme" in u for u in d["github"])
     assert "https://acme.com/blog" in d["blog"]
+    assert any("services" in u.lower() for u in d["services"])
+    assert any("pricing" in u.lower() for u in d["pricing"])
+    assert "https://acme.com/team" in d["team"]
 
 
 def test_collect_evidence_finds_careers_from_nav(acme_company: CompanyRecord, tmp_path: Path) -> None:

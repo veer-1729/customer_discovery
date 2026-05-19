@@ -13,6 +13,7 @@ from customer_discovery.research.search.factory import DisabledSearchProvider, g
 
 logger = logging.getLogger(__name__)
 
+_AUTH_STATUS = {401}
 _QUOTA_STATUS = {402, 403, 429}
 _QUOTA_KEYWORDS = ("quota", "credit", "limit", "insufficient", "exceeded", "billing")
 
@@ -28,6 +29,24 @@ def is_quota_error(exc: BaseException) -> bool:
         return any(k in body for k in _QUOTA_KEYWORDS)
     msg = str(exc).lower()
     return any(k in msg for k in _QUOTA_KEYWORDS)
+
+
+def is_auth_error(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _AUTH_STATUS
+    return False
+
+
+def is_provider_disabled_error(exc: BaseException) -> bool:
+    """Quota/credits exhausted or invalid API key — skip this provider for the run."""
+    return is_quota_error(exc) or is_auth_error(exc)
+
+
+def exc_summary(exc: BaseException) -> str:
+    """Short message for logs (never include request URLs — they may contain API keys)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return str(exc).split("\n", 1)[0][:200]
 
 
 def _provider_names(cfg: dict[str, Any]) -> list[str]:
@@ -98,16 +117,18 @@ class CreditAwareSearchProvider:
             try:
                 return provider.search(query, max_results=max_results)
             except Exception as exc:
-                if is_quota_error(exc):
-                    reason = str(exc)[:200]
-                    self._provider_errors[name] = reason
+                if is_provider_disabled_error(exc):
+                    summary = exc_summary(exc)
+                    self._provider_errors[name] = summary
                     logger.warning(
-                        "Search provider %s exhausted (%s); trying next",
+                        "Search provider %s unavailable (%s); trying next",
                         name,
-                        exc,
+                        summary,
                     )
                     continue
-                logger.warning("Search provider %s failed: %s", name, exc)
+                logger.warning(
+                    "Search provider %s failed: %s", name, exc_summary(exc)
+                )
                 return []
 
         self._mark_exhausted()

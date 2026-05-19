@@ -5,7 +5,11 @@ from pathlib import Path
 import httpx
 
 from customer_discovery.research.search.base import SearchResult
-from customer_discovery.research.search.budget import CreditAwareSearchProvider, is_quota_error
+from customer_discovery.research.search.budget import (
+    CreditAwareSearchProvider,
+    is_auth_error,
+    is_quota_error,
+)
 from customer_discovery.research.tools.search_fallback import SearchFallbackTool
 
 
@@ -14,6 +18,17 @@ def test_is_quota_error_http_429():
     resp = httpx.Response(429, request=req)
     err = httpx.HTTPStatusError("rate limit", request=req, response=resp)
     assert is_quota_error(err)
+
+
+class AuthProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def search(self, query: str, *, max_results: int = 5) -> list[SearchResult]:
+        self.calls += 1
+        req = httpx.Request("GET", "https://serpapi.com/search")
+        resp = httpx.Response(401, request=req)
+        raise httpx.HTTPStatusError("Unauthorized", request=req, response=resp)
 
 
 class QuotaProvider:
@@ -38,6 +53,30 @@ class OkProvider:
                 query_used=query,
             )
         ]
+
+
+def test_is_auth_error_http_401():
+    req = httpx.Request("GET", "https://serpapi.com/search")
+    resp = httpx.Response(401, request=req)
+    err = httpx.HTTPStatusError("Unauthorized", request=req, response=resp)
+    assert is_auth_error(err)
+
+
+def test_serpapi_401_disabled_after_first_call(tmp_path: Path):
+    cfg = {
+        "search": {
+            "enabled": True,
+            "provider": "tavily",
+            "fallback_providers": ["serpapi"],
+        }
+    }
+    provider = CreditAwareSearchProvider(cfg, state_path=tmp_path / "search_state.json")
+    provider._providers = {"tavily": QuotaProvider(), "serpapi": AuthProvider()}
+    provider._active_order = ["tavily", "serpapi"]
+
+    assert provider.search("q1", max_results=1) == []
+    assert provider.search("q2", max_results=1) == []
+    assert provider._providers["serpapi"].calls == 1
 
 
 def test_tavily_quota_falls_through_to_serpapi(tmp_path: Path):

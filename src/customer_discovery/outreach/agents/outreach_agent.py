@@ -79,7 +79,6 @@ def run_outreach_agent(
         out.email_body
         and out.email_subject
         and contact.contact_source != "persona_only"
-        and not brief.manual_review_required
     )
 
     return OutreachPack(

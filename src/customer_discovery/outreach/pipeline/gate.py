@@ -46,7 +46,7 @@ def load_gated_leads(
     top_n = top_n if top_n is not None else gates.get("top_n", 100)
     allowed_conf = set(gates.get("allowed_confidence", ["medium", "high"]))
     exclude_labels = set(gates.get("exclude_fit_labels", ["skip"]))
-    exclude_manual = gates.get("exclude_manual_review", True) and not include_manual_review
+    exclude_manual = gates.get("exclude_manual_review", False) and not include_manual_review
 
     briefs = index_by_company(briefs_path, FinalBrief)
     companies = {c.id: c for c in read_jsonl(companies_path)} if companies_path.exists() else {}

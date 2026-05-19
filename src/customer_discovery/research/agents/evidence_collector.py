@@ -15,6 +15,7 @@ from customer_discovery.research.tools import (
     homepage,
     known_links,
     seed_metadata,
+    site_pages,
     status_page,
 )
 from customer_discovery.research.tools.base import ToolContext
@@ -64,6 +65,7 @@ def collect_evidence(
     run_step("seed_metadata", seed_metadata.run_seed_metadata)
     run_step("homepage", homepage.run_homepage)
     run_step("known_links", known_links.run_known_links_extract)
+    run_step("site_pages", site_pages.run_site_pages)
     run_step("careers", careers.run_careers)
     run_step("docs", docs.run_docs)
     run_step("status", status_page.run_status_page)

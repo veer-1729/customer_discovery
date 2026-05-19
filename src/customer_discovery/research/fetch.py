@@ -38,24 +38,39 @@ def extract_title(html: str) -> str | None:
 
 
 def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
-    """Return (href, link_text) absolute URLs."""
+    """Return (href, link_text) absolute URLs (includes same-page #fragment links)."""
     soup = BeautifulSoup(html, "lxml")
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
+    base_parsed = urlparse(base_url)
     for a in soup.find_all("a", href=True):
         href = str(a["href"]).strip()
-        if not href or href.startswith(("#", "mailto:", "javascript:")):
+        if not href or href.startswith(("mailto:", "javascript:")):
             continue
-        abs_url = urljoin(base_url, href)
+        if href.startswith("#"):
+            if len(href) <= 1:
+                continue
+            abs_url = f"{base_url.rstrip('/')}#{href[1:]}"
+        else:
+            abs_url = urljoin(base_url, href)
         parsed = urlparse(abs_url)
         if parsed.scheme not in ("http", "https"):
             continue
+        if href.startswith("#") and parsed.netloc and base_parsed.netloc:
+            if parsed.netloc != base_parsed.netloc:
+                continue
         if abs_url in seen:
             continue
         seen.add(abs_url)
         text = a.get_text(strip=True)[:120]
         out.append((abs_url, text))
     return out
+
+
+def fetch_dedup_key(url: str) -> tuple[str, str, str]:
+    """Ignore URL fragment so /#services and / do not trigger duplicate HTTP GETs."""
+    parsed = urlparse(url)
+    return (parsed.scheme, parsed.netloc, parsed.path or "/")
 
 
 class PageFetcher:
