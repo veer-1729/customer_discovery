@@ -132,6 +132,9 @@ class OutreachOrchestrator:
         all_packs = sorted(pack_index.values(), key=lambda p: p.rank or 9999)
         write_staged(self.packs_path, all_packs)
         write_outreach_queue(self.queue_path, all_packs)
+        from customer_discovery.outreach.pipeline.review_export import export_outreach_review
+
+        export_outreach_review(self.opts.output_dir, all_packs)
         stats["packs_written"] = len(all_packs)
         return stats
 

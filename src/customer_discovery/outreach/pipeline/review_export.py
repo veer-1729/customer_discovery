@@ -13,6 +13,7 @@ EXCEL_COLUMNS = [
     "website",
     "final_score",
     "confidence",
+    "final_stage",
     "ready_to_send",
     "contact_persona",
     "contact_name",
@@ -20,6 +21,8 @@ EXCEL_COLUMNS = [
     "contact_email",
     "contact_linkedin",
     "contact_source",
+    "hook_email",
+    "hook_linkedin",
     "email_subject",
     "email_body",
     "linkedin_connection_note",
@@ -27,7 +30,9 @@ EXCEL_COLUMNS = [
     "company_summary",
     "pain_points",
     "value_props_for_them",
+    "disqualifier_notes",
     "review_warnings",
+    "evidence_ids_used",
     "important_urls",
 ]
 
@@ -45,7 +50,7 @@ REVIEW_COLUMNS = [
     "contact_source",
     "email_subject",
     "email_preview",
-    "draft_file",
+    "pack_file",
     "review_warnings",
 ]
 
@@ -59,46 +64,49 @@ def _one_line(text: str | None, max_len: int = 200) -> str:
     return flat[: max_len - 3] + "..."
 
 
-def _draft_filename(p: OutreachPack) -> str:
+def _pack_filename(p: OutreachPack) -> str:
     rank = p.rank if p.rank is not None else 0
     safe_id = re.sub(r"[^\w.-]", "_", p.company_id)
     return f"{rank:03d}_{safe_id}.md"
 
 
-def _render_draft(p: OutreachPack) -> str:
+def render_outreach_pack(p: OutreachPack) -> str:
+    """Human-readable view of one outreach_packs.jsonl entry (not the queue CSV)."""
     lines = [
         f"# {p.company_name}",
         "",
+        "_From `outreach_packs.jsonl` — outreach-specific fields (hooks, value props, drafts)._",
+        "",
+        "## Overview",
+        "",
+        f"- **Company ID:** `{p.company_id}`",
         f"- **Rank:** {p.rank}",
         f"- **Score:** {p.final_score} ({p.confidence})",
+        f"- **Research stage:** {p.final_stage}",
         f"- **Ready to send:** {p.ready_to_send}",
         f"- **Website:** {p.website or ''}",
-        "",
-        "## Contact",
-        "",
     ]
-    c = p.contact
-    if c.name:
-        lines.append(f"- **Name:** {c.name}")
-    if c.title:
-        lines.append(f"- **Title:** {c.title}")
-    if c.persona:
-        lines.append(f"- **Persona:** {c.persona}")
-    if c.email:
-        lines.append(f"- **Email:** {c.email}")
-    if c.linkedin_url:
-        lines.append(f"- **LinkedIn:** {c.linkedin_url}")
-    lines.append(f"- **Source:** {c.contact_source}")
+    if p.generated_at:
+        lines.append(f"- **Generated:** {p.generated_at.isoformat()}")
     if p.review_warnings:
-        lines.extend(["", f"**Warnings:** {', '.join(p.review_warnings)}"])
+        lines.append(f"- **Warnings:** {', '.join(p.review_warnings)}")
 
-    lines.extend(["", "## Email", "", f"**Subject:** {p.email_subject or ''}", ""])
+    if p.hook_email or p.hook_linkedin:
+        lines.extend(["", "## Hooks", ""])
+        if p.hook_email:
+            lines.extend(["", "### Email hook", "", p.hook_email.strip()])
+        if p.hook_linkedin:
+            lines.extend(["", "### LinkedIn hook", "", p.hook_linkedin.strip()])
+
+    lines.extend(["", "## Email draft", "", f"**Subject:** {p.email_subject or ''}", ""])
     if p.email_body:
         lines.extend(["```", p.email_body.strip(), "```", ""])
 
     lines.extend(["", "## LinkedIn connection note", ""])
     if p.linkedin_connection_note:
         lines.append(p.linkedin_connection_note.strip())
+    else:
+        lines.append("_(none)_")
 
     if p.discovery_question:
         lines.extend(["", "## Discovery question", "", p.discovery_question.strip()])
@@ -111,14 +119,38 @@ def _render_draft(p: OutreachPack) -> str:
         lines.extend(f"- {x}" for x in p.pain_points)
 
     if p.value_props_for_them:
-        lines.extend(["", "## Value props", ""])
+        lines.extend(["", "## Value props (for them)", ""])
         lines.extend(f"- {x}" for x in p.value_props_for_them)
 
+    if p.disqualifier_notes:
+        lines.extend(["", "## Disqualifier notes", ""])
+        lines.extend(f"- {x}" for x in p.disqualifier_notes)
+
+    lines.extend(["", "## Contact", ""])
+    c = p.contact
+    if c.name:
+        lines.append(f"- **Name:** {c.name}")
+    if c.title:
+        lines.append(f"- **Title:** {c.title}")
+    if c.persona:
+        lines.append(f"- **Persona:** {c.persona}")
+    if c.email:
+        lines.append(f"- **Email:** {c.email}")
+    if c.linkedin_url:
+        lines.append(f"- **LinkedIn:** {c.linkedin_url}")
+    lines.append(f"- **Source:** {c.contact_source}")
+
+    if p.evidence_ids_used:
+        lines.extend(["", "## Evidence IDs used", ""])
+        lines.extend(f"- `{eid}`" for eid in p.evidence_ids_used)
+
     if p.important_urls:
-        lines.extend(["", "## URLs", ""])
+        lines.extend(["", "## Important URLs", ""])
         for u in p.important_urls:
-            mark = " *(used)*" if u.used_in_reasoning else ""
-            lines.append(f"- [{u.source_type}]({u.url}){mark}")
+            mark = " *(used in reasoning)*" if u.used_in_reasoning else ""
+            lines.append(f"- **[{u.source_type}]({u.url})**{mark}")
+            if u.why_important:
+                lines.append(f"  - {u.why_important}")
 
     return "\n".join(lines) + "\n"
 
@@ -128,10 +160,13 @@ def _bullet_lines(items: list[str]) -> str:
 
 
 def _format_urls(p: OutreachPack) -> str:
-    return "\n".join(
-        f"[{u.source_type}] {u.url}" + (" *" if u.used_in_reasoning else "")
-        for u in p.important_urls
-    )
+    lines: list[str] = []
+    for u in p.important_urls:
+        mark = " *" if u.used_in_reasoning else ""
+        lines.append(f"[{u.source_type}] {u.url}{mark}")
+        if u.why_important:
+            lines.append(f"  {u.why_important}")
+    return "\n".join(lines)
 
 
 def _pack_excel_row(p: OutreachPack) -> dict[str, str | int | bool]:
@@ -143,7 +178,10 @@ def _pack_excel_row(p: OutreachPack) -> dict[str, str | int | bool]:
         "website": p.website or "",
         "final_score": p.final_score,
         "confidence": p.confidence,
+        "final_stage": p.final_stage,
         "ready_to_send": p.ready_to_send,
+        "hook_email": (p.hook_email or "").strip(),
+        "hook_linkedin": (p.hook_linkedin or "").strip(),
         "contact_persona": c.persona or "",
         "contact_name": c.name or "",
         "contact_title": c.title or "",
@@ -157,7 +195,9 @@ def _pack_excel_row(p: OutreachPack) -> dict[str, str | int | bool]:
         "company_summary": (p.company_summary or "").strip(),
         "pain_points": _bullet_lines(p.pain_points),
         "value_props_for_them": _bullet_lines(p.value_props_for_them),
+        "disqualifier_notes": _bullet_lines(p.disqualifier_notes),
         "review_warnings": "; ".join(p.review_warnings),
+        "evidence_ids_used": ", ".join(p.evidence_ids_used),
         "important_urls": _format_urls(p),
     }
 
@@ -179,11 +219,14 @@ def write_outreach_excel(path: Path, packs: list[OutreachPack]) -> None:
         cell.font = Font(bold=True)
 
     long_cols = {
+        "hook_email",
+        "hook_linkedin",
         "email_body",
         "linkedin_connection_note",
         "company_summary",
         "pain_points",
         "value_props_for_them",
+        "disqualifier_notes",
         "important_urls",
     }
     long_col_idxs = {EXCEL_COLUMNS.index(c) + 1 for c in long_cols}
@@ -206,7 +249,10 @@ def write_outreach_excel(path: Path, packs: list[OutreachPack]) -> None:
         "website": 28,
         "final_score": 10,
         "confidence": 12,
+        "final_stage": 12,
         "ready_to_send": 14,
+        "hook_email": 40,
+        "hook_linkedin": 36,
         "contact_persona": 24,
         "contact_name": 18,
         "contact_title": 22,
@@ -220,7 +266,9 @@ def write_outreach_excel(path: Path, packs: list[OutreachPack]) -> None:
         "company_summary": 48,
         "pain_points": 40,
         "value_props_for_them": 40,
+        "disqualifier_notes": 32,
         "review_warnings": 24,
+        "evidence_ids_used": 28,
         "important_urls": 48,
     }
     for idx, col_name in enumerate(EXCEL_COLUMNS, start=1):
@@ -231,18 +279,18 @@ def write_outreach_excel(path: Path, packs: list[OutreachPack]) -> None:
 
 
 def export_outreach_review(output_dir: Path, packs: list[OutreachPack]) -> dict[str, Path]:
-    """Write Excel-friendly summary CSV and per-company markdown drafts."""
-    drafts_dir = output_dir / "drafts"
-    drafts_dir.mkdir(parents=True, exist_ok=True)
+    """Readable exports from outreach_packs.jsonl (markdown + Excel + summary CSV)."""
+    packs_dir = output_dir / "packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
     review_path = output_dir / "outreach_review.csv"
 
     sorted_packs = sorted(packs, key=lambda p: p.rank or 9999)
     rows: list[dict[str, str]] = []
 
     for p in sorted_packs:
-        draft_name = _draft_filename(p)
-        draft_path = drafts_dir / draft_name
-        draft_path.write_text(_render_draft(p), encoding="utf-8")
+        pack_name = _pack_filename(p)
+        pack_path = packs_dir / pack_name
+        pack_path.write_text(render_outreach_pack(p), encoding="utf-8")
         rows.append(
             {
                 "rank": str(p.rank or ""),
@@ -258,7 +306,7 @@ def export_outreach_review(output_dir: Path, packs: list[OutreachPack]) -> dict[
                 "contact_source": p.contact.contact_source,
                 "email_subject": p.email_subject or "",
                 "email_preview": _one_line(p.email_body),
-                "draft_file": f"drafts/{draft_name}",
+                "pack_file": f"packs/{pack_name}",
                 "review_warnings": "; ".join(p.review_warnings),
             }
         )
@@ -271,8 +319,43 @@ def export_outreach_review(output_dir: Path, packs: list[OutreachPack]) -> dict[
     excel_path = output_dir / "outreach_packs.xlsx"
     write_outreach_excel(excel_path, sorted_packs)
 
+    readme_path = output_dir / "README.md"
+    _write_outreach_index(readme_path, sorted_packs)
+
     return {
         "review_csv": review_path,
         "review_xlsx": excel_path,
-        "drafts_dir": drafts_dir,
+        "packs_dir": packs_dir,
+        "readme": readme_path,
     }
+
+
+def _write_outreach_index(path: Path, packs: list[OutreachPack]) -> None:
+    lines = [
+        "# Outreach packs (readable)",
+        "",
+        f"{len(packs)} entries from **`outreach_packs.jsonl`** — hooks, email/LinkedIn drafts,",
+        "value props, and outreach contact info. (Not the same as `outreach_queue.csv`.)",
+        "",
+        "| Rank | Company | Ready | Read pack |",
+        "| ---: | --- | :---: | --- |",
+    ]
+    for p in packs:
+        pack_rel = f"packs/{_pack_filename(p)}"
+        ready = "yes" if p.ready_to_send else "no"
+        lines.append(f"| {p.rank or ''} | {p.company_name} | {ready} | [{pack_rel}]({pack_rel}) |")
+    lines.extend(
+        [
+            "",
+            "## Files",
+            "",
+            "- **`packs/`** — one markdown file per `outreach_packs.jsonl` row (start here)",
+            "- `outreach_packs.xlsx` — same data in Excel",
+            "- `outreach_review.csv` — short index only",
+            "- `outreach_queue.csv` — flat send queue (subset of columns)",
+            "- `outreach_packs.jsonl` — source JSONL",
+            "",
+            f"Regenerate: `customer-discovery outreach export --output-dir {path.parent}`",
+        ]
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

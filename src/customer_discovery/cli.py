@@ -446,6 +446,39 @@ def research_stats(
     typer.echo(f"top_leads.csv: {'yes' if csv_path.exists() else 'no'}")
 
 
+@research_app.command("export")
+def research_export(
+    output_dir: Path = typer.Option(_default_research_dir(), "--output-dir"),
+    top_n: int | None = typer.Option(None, "--top-n", help="Only export top N by rank from top_leads.csv"),
+) -> None:
+    """Export per-company markdown briefs (like outreach drafts) from final_briefs.jsonl."""
+    from customer_discovery.models.final import FinalBrief
+    from customer_discovery.models.premium import PremiumBrief
+    from customer_discovery.research.pipeline.brief_export import export_research_briefs
+    from customer_discovery.storage.staged_jsonl import read_staged
+
+    finals_path = output_dir / "final_briefs.jsonl"
+    if not finals_path.exists():
+        typer.echo(f"Missing {finals_path}. Run research first.", err=True)
+        raise typer.Exit(1)
+    finals = read_staged(finals_path, FinalBrief)
+    premiums_path = output_dir / "premium_briefs.jsonl"
+    premiums = (
+        read_staged(premiums_path, PremiumBrief) if premiums_path.exists() else None
+    )
+    paths = export_research_briefs(
+        output_dir,
+        finals,
+        premiums,
+        leads_csv=output_dir / "top_leads.csv",
+        top_n=top_n,
+    )
+    typer.echo(f"Wrote {len(finals) if not top_n else min(top_n, len(finals))} briefs to {paths['briefs_dir']}/")
+    typer.echo(f"Index: {paths['readme']}")
+    if "premium_dir" in paths:
+        typer.echo(f"Premium: {paths['premium_dir']}/")
+
+
 @research_app.command("show")
 def research_show(
     company_id: str = typer.Argument(..., help="Company id slug"),
@@ -571,7 +604,7 @@ def outreach_export(
     packs = read_staged(packs_path, OutreachPack)
     paths = export_outreach_review(output_dir, packs)
     typer.echo(f"Wrote {len(packs)} rows to {paths['review_xlsx']} (open in Excel)")
-    typer.echo(f"Also: {paths['review_csv']}, {paths['drafts_dir']}/")
+    typer.echo(f"Packs (markdown): {paths['packs_dir']}/  |  Index: {paths['readme']}")
 
 
 @outreach_app.command("stats")

@@ -11,6 +11,7 @@ def test_export_outreach_review(tmp_path: Path) -> None:
         website="https://acme.com",
         rank=1,
         final_score=90,
+        hook_email="Strong fit for on-call teams.",
         email_subject="Hi",
         email_body="Line one\n\nLine two",
         contact=OutreachContact(name="Ada", contact_source="seed_team"),
@@ -21,6 +22,8 @@ def test_export_outreach_review(tmp_path: Path) -> None:
     assert "Acme" in csv_text
     assert "Line one Line two" in csv_text or "Line one" in csv_text
     assert paths["review_xlsx"].exists()
-    drafts = list(paths["drafts_dir"].glob("*.md"))
-    assert len(drafts) == 1
-    assert "Line one" in drafts[0].read_text(encoding="utf-8")
+    packs = list(paths["packs_dir"].glob("*.md"))
+    assert len(packs) == 1
+    text = packs[0].read_text(encoding="utf-8")
+    assert "Line one" in text
+    assert "outreach_packs.jsonl" in text

@@ -1,0 +1,60 @@
+# Grade
+
+- **Rank:** None
+- **Score:** 95 (high)
+- **Stage:** premium
+- **Fit:** strong_candidate
+- **Manual review:** False
+- **Website:** https://usegrade.com
+
+## Summary
+
+Grade is a B2B company offering a payout API for marketplaces and agencies to manage creator payments, compliance, and operational overheads such as KYC and tax reporting. It integrates advanced payment compliance features, including adherence to DAC7 regulations, making it especially suitable for platforms needing to simplify complex, international transactions. Its clear focus on API-based solutions, presence of comprehensive documentation, and language around on-call support signal a strong alignment with the production-critical nature of Emergent Delta's target consumer base: small engineering teams focused on reliability without a full SRE headcount.
+
+## Positive signals
+
+- Grade provides an API for marketplaces to facilitate creator payments internationally, simplifying compliance in the process.
+  - evidence: `ev_325622f57874, ev_db0bbb60ff96`
+- Grade supports API integration, allowing clients to avoid building complex payment systems in-house, saving engineering time.
+  - evidence: `ev_910453dba76b, ev_76366cfc1285`
+- The company maintains a focus on compliance management, covering KYC, DAC7, and other international regulations.
+  - evidence: `ev_325622f57874, ev_decefd00b37b`
+
+## Likely pain points
+
+- Complexity in managing international payment compliance for a large number of creators.
+- Need for rapid resolution of compliance or payment-related issues to avoid service interruptions.
+- Desire to minimize engineering overhead associated with maintaining in-house payment solutions.
+
+## Best contact persona
+
+Head of Payments/Finance for Marketplaces
+
+## Hook
+
+Discover how Emergent Delta can enhance Grade's payment API ecosystem with faster incident root-cause analysis without needing a dedicated SRE team.
+
+## Discovery question
+
+Can you describe the most challenging aspects you face regarding compliance and payment operations for creators?
+
+## Evidence IDs used
+
+`ev_325622f57874`, `ev_db0bbb60ff96`, `ev_decefd00b37b`
+
+## URLs
+
+- [homepage](https://usegrade.com) *(used)*
+- [fallback_page](https://usegrade.com/agencies)
+  - Fetched from search result for additional context.
+- [blog](https://usegrade.com/blog)
+  - Product updates and engineering narrative.
+- [careers](https://usegrade.com/blog/post/a-founder-s-guide-to-paying-international-contractors) *(used)*
+  - Contains hiring/on-call/reliability signals.
+- [search_result](https://usegrade.com/blog/post/how-to-scale-ugc)
+  - Discovered via web search fallback.
+- [search_result](https://usegrade.com/blog/post/why-paywalls-matter-more-than-you-think)
+  - Discovered via web search fallback.
+- [docs](https://usegrade.com/marketplaces) *(used)*
+- [seed_metadata](https://www.ycombinator.com/companies/grade)
+  - Source list metadata (YC/CMU).
