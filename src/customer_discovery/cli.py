@@ -555,6 +555,25 @@ def _run_outreach(**kwargs) -> None:
     typer.echo(f"Outreach done. {stats}")
 
 
+@outreach_app.command("export")
+def outreach_export(
+    output_dir: Path = typer.Option(_default_outreach_dir(), "--output-dir"),
+) -> None:
+    """Export Excel-friendly review CSV and per-company markdown drafts."""
+    from customer_discovery.models.outreach import OutreachPack
+    from customer_discovery.outreach.pipeline.review_export import export_outreach_review
+    from customer_discovery.storage.staged_jsonl import read_staged
+
+    packs_path = output_dir / "outreach_packs.jsonl"
+    if not packs_path.exists():
+        typer.echo(f"Missing {packs_path}. Run outreach first.", err=True)
+        raise typer.Exit(1)
+    packs = read_staged(packs_path, OutreachPack)
+    paths = export_outreach_review(output_dir, packs)
+    typer.echo(f"Wrote {len(packs)} rows to {paths['review_xlsx']} (open in Excel)")
+    typer.echo(f"Also: {paths['review_csv']}, {paths['drafts_dir']}/")
+
+
 @outreach_app.command("stats")
 def outreach_stats(
     output_dir: Path = typer.Option(_default_outreach_dir(), "--output-dir"),
