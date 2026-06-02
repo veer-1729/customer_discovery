@@ -4,6 +4,7 @@ import csv
 import re
 from pathlib import Path
 
+from customer_discovery.models.final import FinalBrief
 from customer_discovery.models.outreach import OutreachPack
 
 EXCEL_COLUMNS = [
@@ -70,7 +71,83 @@ def _pack_filename(p: OutreachPack) -> str:
     return f"{rank:03d}_{safe_id}.md"
 
 
-def render_outreach_pack(p: OutreachPack) -> str:
+
+def _signal_claims(signals, limit: int = 5) -> list[str]:
+    return [s.claim for s in signals[:limit] if s.claim]
+
+
+def _render_outreach_decision(
+    p: OutreachPack,
+    brief: "FinalBrief | None" = None,
+    lead_row: dict[str, str] | None = None,
+) -> list[str]:
+    lines = ["", "## Should we reach out?", ""]
+
+    pros: list[str] = []
+    cons: list[str] = []
+
+    pros.extend(p.value_props_for_them)
+    pros.extend(p.pain_points)
+    if brief:
+        pros.extend(_signal_claims(brief.positive_signals))
+    if lead_row:
+        for part in (lead_row.get("top_positive_signals") or "").split(";"):
+            part = part.strip()
+            if part and part not in pros:
+                pros.append(part)
+
+    cons.extend(p.disqualifier_notes)
+    cons.extend(p.review_warnings)
+    if brief:
+        cons.extend(brief.disqualifiers)
+        cons.extend(_signal_claims(brief.negative_signals))
+        if brief.manual_review_required:
+            cons.append("Manual review flagged during research")
+    if lead_row:
+        for part in (lead_row.get("top_negative_signals") or "").split(";"):
+            part = part.strip()
+            if part and part not in cons:
+                cons.append(part)
+        for part in (lead_row.get("disqualifiers") or "").split(";"):
+            part = part.strip()
+            if part and part not in cons:
+                cons.append(part)
+
+    # dedupe preserving order
+    def dedupe(items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for x in items:
+            if x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    pros = dedupe(pros)
+    cons = dedupe(cons)
+
+    lines.append("### Pros")
+    if pros:
+        lines.extend(f"- {x}" for x in pros[:8])
+    else:
+        lines.append("- _(none listed)_")
+
+    lines.append("")
+    lines.append("### Cons")
+    if cons:
+        lines.extend(f"- {x}" for x in cons[:8])
+    else:
+        lines.append("- _(none listed)_")
+
+    return lines
+
+
+def render_outreach_pack(
+    p: OutreachPack,
+    *,
+    brief: FinalBrief | None = None,
+    lead_row: dict[str, str] | None = None,
+) -> str:
     """Human-readable view of one outreach_packs.jsonl entry (not the queue CSV)."""
     lines = [
         f"# {p.company_name}",
@@ -90,6 +167,12 @@ def render_outreach_pack(p: OutreachPack) -> str:
         lines.append(f"- **Generated:** {p.generated_at.isoformat()}")
     if p.review_warnings:
         lines.append(f"- **Warnings:** {', '.join(p.review_warnings)}")
+
+    fit_label = brief.fit_label if brief else ""
+    if fit_label:
+        lines.append(f"- **Fit label:** {fit_label}")
+
+    lines.extend(_render_outreach_decision(p, brief, lead_row))
 
     if p.hook_email or p.hook_linkedin:
         lines.extend(["", "## Hooks", ""])
@@ -278,8 +361,29 @@ def write_outreach_excel(path: Path, packs: list[OutreachPack]) -> None:
     wb.save(path)
 
 
-def export_outreach_review(output_dir: Path, packs: list[OutreachPack]) -> dict[str, Path]:
+def export_outreach_review(
+    output_dir: Path,
+    packs: list[OutreachPack],
+    *,
+    briefs_path: Path | None = None,
+    leads_path: Path | None = None,
+) -> dict[str, Path]:
     """Readable exports from outreach_packs.jsonl (markdown + Excel + summary CSV)."""
+    from customer_discovery.storage.staged_jsonl import index_by_company
+
+    briefs_map: dict[str, FinalBrief] = {}
+    if briefs_path and briefs_path.exists():
+        briefs_map = index_by_company(briefs_path, FinalBrief)
+
+    lead_rows: dict[str, dict[str, str]] = {}
+    if leads_path and leads_path.exists():
+        with leads_path.open(encoding="utf-8") as lf:
+            reader = csv.DictReader(lf)
+            for row in reader:
+                cid = (row.get("company_id") or "").strip()
+                if cid:
+                    lead_rows[cid] = row
+
     packs_dir = output_dir / "packs"
     packs_dir.mkdir(parents=True, exist_ok=True)
     review_path = output_dir / "outreach_review.csv"
@@ -290,7 +394,14 @@ def export_outreach_review(output_dir: Path, packs: list[OutreachPack]) -> dict[
     for p in sorted_packs:
         pack_name = _pack_filename(p)
         pack_path = packs_dir / pack_name
-        pack_path.write_text(render_outreach_pack(p), encoding="utf-8")
+        pack_path.write_text(
+            render_outreach_pack(
+                p,
+                brief=briefs_map.get(p.company_id),
+                lead_row=lead_rows.get(p.company_id),
+            ),
+            encoding="utf-8",
+        )
         rows.append(
             {
                 "rank": str(p.rank or ""),

@@ -18,6 +18,23 @@ column_map:
   founder: "Name of CMU affiliated founder:"
   linkedin: "LinkedIn:"
   employees: "Number of employees:"
+  hiring: "Are you currently hiring?"
+
+# Default Part 1 scrape: Bay Area OR Pittsburgh, 1–30 employees (no vertical/hiring filters).
+scrape_presets:
+  bay_pittsburgh_1_30:
+    employee_size: "1-30"
+    conjunction: or
+    conditions:
+      - field: "Company location:"
+        operator: contains
+        value: Pittsburgh
+      - field: "Company location:"
+        operator: contains
+        value: Bay Area
+      - field: "Company location:"
+        operator: contains
+        value: San Francisco
 employee_size:
   field: "Number of employees:"
   # Airtable single-select buckets (extend if the base adds more)

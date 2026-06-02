@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 import httpx
 import yaml
 
-from customer_discovery.models.company import CompanyRecord
+from customer_discovery.models.company import CompanyRecord, ExternalLinks, TeamMember
 from customer_discovery.sources.base import CompanySource
 from customer_discovery.sources.cmu_filters import CMUFilterConfig, FilterCondition
 from customer_discovery.sources.registry import register_source
@@ -43,6 +44,38 @@ def _row_value(row: dict[str, str], column: str | None) -> str | None:
     return val or None
 
 
+def _split_verticals(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    parts = re.split(r"[,;\|\n]+", raw)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _normalize_linkedin(url: str | None) -> str | None:
+    if not url:
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if "linkedin.com" in url.lower():
+        return f"https://{url.lstrip('/')}"
+    return None
+
+
+def _normalize_employee_bucket(bucket: str | None) -> str | None:
+    if not bucket:
+        return None
+    b = bucket.strip()
+    if not b:
+        return None
+    # CMU cards display "0-10"; config buckets use "1-10".
+    if b == "0-10":
+        return "1-10"
+    return b
+
+
 def _resolve_view_url(config: dict[str, Any], view: str | None) -> str:
     base = config.get("shared_view_url", "")
     views = config.get("views", {})
@@ -69,10 +102,20 @@ def _row_to_record(row: dict[str, str], config: dict[str, Any]) -> CompanyRecord
     website = _row_value(row, column_map.get("website"))
     description = _row_value(row, column_map.get("description"))
     industry_raw = _row_value(row, column_map.get("industry"))
-    industries = [industry_raw] if industry_raw else []
+    industries = _split_verticals(industry_raw)
     location = _row_value(row, column_map.get("location"))
     founder = _row_value(row, column_map.get("founder"))
-    linkedin = _row_value(row, column_map.get("linkedin"))
+    linkedin = _normalize_linkedin(_row_value(row, column_map.get("linkedin")))
+    hiring = _row_value(row, column_map.get("hiring"))
+    employees = _normalize_employee_bucket(_row_value(row, column_map.get("employees")))
+
+    team: list[TeamMember] = []
+    if founder:
+        team.append(TeamMember(name=founder, role="Founder", linkedin_url=linkedin))
+
+    links = ExternalLinks()
+    if linkedin:
+        links.linkedin = linkedin
 
     return CompanyRecord(
         id=CompanyRecord.make_id(name, website),
@@ -82,14 +125,23 @@ def _row_to_record(row: dict[str, str], config: dict[str, Any]) -> CompanyRecord
         industry=industries,
         program=program,
         source="cmu",
+        source_url=config.get("shared_view_url"),
+        team=team,
+        links=links,
         raw={
             **row,
             "location": location,
             "founder": founder,
             "linkedin": linkedin,
+            "hiring": hiring,
+            "employees": employees,
         },
         scraped_at=datetime.now(timezone.utc),
     )
+
+
+def _csv_has_employee_values(rows: list[dict[str, str]], field: str) -> bool:
+    return any((row.get(field) or "").strip() for row in rows)
 
 
 async def _iter_csv_rows(
@@ -102,17 +154,33 @@ async def _iter_csv_rows(
     skipped = 0
     with csv_path.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            if not filter_config.apply_to_row(row):
-                skipped += 1
-                continue
-            record = _row_to_record(row, config)
-            if record is None:
-                continue
-            yield record
-            count += 1
-            if limit is not None and count >= limit:
-                return
+        all_rows = list(reader)
+    effective = filter_config
+    if filter_config.employee_size_range and not _csv_has_employee_values(
+        all_rows, filter_config.employee_size_field
+    ):
+        log.warning(
+            "CMU CSV has no %r values (gallery export omits this field). "
+            "Skipping employee-size filter for this ingest; use a full Airtable CSV export for 1–30 filtering.",
+            filter_config.employee_size_field,
+        )
+        effective = CMUFilterConfig(
+            conditions=list(filter_config.conditions),
+            conjunction=filter_config.conjunction,
+            employee_buckets=list(filter_config.employee_buckets),
+            employee_size_field=filter_config.employee_size_field,
+        )
+    for row in all_rows:
+        if not effective.apply_to_row(row):
+            skipped += 1
+            continue
+        record = _row_to_record(row, config)
+        if record is None:
+            continue
+        yield record
+        count += 1
+        if limit is not None and count >= limit:
+            return
     log.info("CMU CSV: kept %s rows (%s filtered out)", count, skipped)
 
 

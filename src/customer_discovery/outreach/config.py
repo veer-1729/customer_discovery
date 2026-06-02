@@ -12,7 +12,12 @@ def project_root() -> Path:
     return _ROOT
 
 
-def load_outreach_config() -> dict[str, Any]:
-    path = _ROOT / "config" / "outreach.yaml"
+def load_outreach_config(config_path: Path | str | None = None) -> dict[str, Any]:
+    if config_path is None:
+        path = _ROOT / "config" / "outreach.yaml"
+    else:
+        path = Path(config_path)
+        if not path.is_absolute():
+            path = _ROOT / path
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f) or {}

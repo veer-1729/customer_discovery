@@ -20,8 +20,20 @@ def load_yaml(name: str) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def load_research_config() -> dict[str, Any]:
-    return load_yaml("research.yaml")
+def load_yaml_path(path: Path | str) -> dict[str, Any]:
+    p = Path(path)
+    if not p.is_absolute():
+        p = _ROOT / p
+    if not p.exists():
+        raise FileNotFoundError(f"Config not found: {p}")
+    with p.open(encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_research_config(config_path: Path | str | None = None) -> dict[str, Any]:
+    if config_path is None:
+        return load_yaml("research.yaml")
+    return load_yaml_path(config_path)
 
 
 def load_product_config() -> dict[str, Any]:

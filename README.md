@@ -86,6 +86,38 @@ Only `data/.gitkeep` is tracked; pipeline outputs stay local.
 
 ---
 
+
+## CMU Stage 3 (research + outreach)
+
+```bash
+source .venv/bin/activate
+
+# Part 2 — full LLM funnel (83 companies, critic + premium for all)
+customer-discovery research \
+  -i data/companies_cmu_bay_pitt_1_20.jsonl \
+  --output-dir data/research_cmu_bay_pitt_1_20 \
+  --research-config config/research_cmu_bay_pitt.yaml \
+  --top-n 83 \
+  --resume
+
+# Part 3 — gated outreach (skill-enhanced copy)
+customer-discovery outreach \
+  --outreach-config config/outreach_cmu_bay_pitt.yaml \
+  --output-dir data/outreach_cmu_bay_pitt_1_20 \
+  --resume
+
+# Readable packs (pros/cons in each pack markdown)
+customer-discovery outreach export --output-dir data/outreach_cmu_bay_pitt_1_20
+```
+
+Outputs: `data/research_cmu_bay_pitt_1_20/top_leads.csv`, `data/outreach_cmu_bay_pitt_1_20/packs/`, index `data/outreach_cmu_bay_pitt_1_20/README.md`.
+
+## Outreach copy skills (Cursor Agent)
+
+For **interactive** draft and rewrite of discovery emails (not the CLI pipeline), see [`.cursor/skills/README.md`](.cursor/skills/README.md). Skills: `cold-email`, `cold-outreach-sequence`, `cold-email-rewrite`. Demo prompt: [`skills/demo-prompts/founding-engineer-incident-debug.md`](skills/demo-prompts/founding-engineer-incident-debug.md).
+
+---
+
 ## Command reference
 
 | Command | Purpose |

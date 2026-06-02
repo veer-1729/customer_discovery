@@ -42,6 +42,10 @@ HARDWARE_INDUSTRY_TERMS = (
     "construction",
     "energy",
     "mining",
+    "agriculture",
+    "agritech",
+    "farming",
+    "aquaculture",
 )
 
 SOFTWARE_INDUSTRY_TERMS = (

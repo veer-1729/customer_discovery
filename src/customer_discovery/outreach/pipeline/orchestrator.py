@@ -43,6 +43,7 @@ class OutreachOptions:
     estimate_cost: bool = False
     include_manual_review: bool = False
     force_regenerate: bool = False
+    config_path: Path | None = None
 
 
 def estimate_outreach_cost(n: int, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -57,7 +58,7 @@ def estimate_outreach_cost(n: int, cfg: dict[str, Any]) -> dict[str, Any]:
 class OutreachOrchestrator:
     def __init__(self, opts: OutreachOptions) -> None:
         self.opts = opts
-        self.cfg = load_outreach_config()
+        self.cfg = load_outreach_config(opts.config_path)
         self.product = load_product_config()
         self.packs_path = opts.output_dir / "outreach_packs.jsonl"
         self.queue_path = opts.output_dir / "outreach_queue.csv"
@@ -125,6 +126,7 @@ class OutreachOrchestrator:
                 product=self.product,
                 linkedin_max_chars=linkedin_max,
                 rank=lead.rank,
+                outreach_cfg=self.cfg,
             )
             pack_index[lead.company_id] = pack
             self._write_cache(lead.company_id, pack)
@@ -134,7 +136,12 @@ class OutreachOrchestrator:
         write_outreach_queue(self.queue_path, all_packs)
         from customer_discovery.outreach.pipeline.review_export import export_outreach_review
 
-        export_outreach_review(self.opts.output_dir, all_packs)
+        export_outreach_review(
+            self.opts.output_dir,
+            all_packs,
+            briefs_path=self.opts.briefs_path,
+            leads_path=self.opts.leads_path,
+        )
         stats["packs_written"] = len(all_packs)
         return stats
 

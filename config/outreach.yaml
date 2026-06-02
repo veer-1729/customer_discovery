@@ -4,47 +4,45 @@ paths:
   companies: data/companies.jsonl
   output_dir: data/outreach
   cache_dir: data/raw/outreach
-
 gates:
   min_score: 70
   allowed_confidence:
-    - medium
-    - high
+  - medium
+  - high
   exclude_fit_labels:
-    - skip
+  - skip
   exclude_manual_review: false
   top_n: 100
-
 models:
   default: gpt-4o-mini
   premium_model: gpt-4o
-  premium_top_n: 0  # 0 = always use default (mini) for outreach drafts
-
+  premium_top_n: 0
 contact:
   mode: seed_only
   persona_role_keywords:
     technical_founder:
-      - founder
-      - co-founder
-      - ceo
-      - chief executive
+    - founder
+    - co-founder
+    - ceo
+    - chief executive
     cto:
-      - cto
-      - chief technology
+    - cto
+    - chief technology
     backend_engineer:
-      - backend
-      - software engineer
-      - full stack
-      - fullstack
+    - backend
+    - software engineer
+    - full stack
+    - fullstack
     platform_engineer:
-      - platform
-      - infrastructure
-      - devops
-      - sre
-      - site reliability
-
+    - platform
+    - infrastructure
+    - devops
+    - sre
+    - site reliability
 linkedin_max_chars: 300
-
 cost_estimates:
   input_tokens: 2500
   output_tokens: 1200
+copy_guidelines:
+  enabled: true
+  skill_dir: .cursor/skills

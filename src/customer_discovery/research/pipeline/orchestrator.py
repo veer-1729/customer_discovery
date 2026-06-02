@@ -51,6 +51,7 @@ class ResearchOptions:
     force_search: bool = False
     estimate_cost: bool = False
     verbose: bool = False
+    config_path: Path | None = None
 
 
 @dataclass
@@ -68,7 +69,7 @@ class ResearchStats:
 class ResearchOrchestrator:
     def __init__(self, opts: ResearchOptions) -> None:
         self.opts = opts
-        self.cfg = load_research_config()
+        self.cfg = load_research_config(opts.config_path)
         self.product = load_product_config()
         self.icp = load_icp_config()
         self.paths = {
@@ -103,6 +104,7 @@ class ResearchOrchestrator:
             )
             logger.info("Cost estimate: %s", est)
             print(est)
+            return self.stats
 
         SearchFallbackTool.configure(
             self.cfg,
@@ -255,6 +257,13 @@ class ResearchOrchestrator:
         all_final = list(index_by_company(self.paths["final"], FinalBrief).values())
         write_top_leads_csv(self.paths["csv"], all_final, bundles)
 
+
+    def _premium_evidence_ok(self, bundle, signals) -> bool:
+        stage = self.cfg.get("stages", {}).get("premium", {})
+        if not stage.get("require_evidence_quality", True):
+            return True
+        return qualifies_for_premium_llm(bundle, signals)
+
     def _critic_top_n(self) -> int | None:
         stage = self.cfg.get("stages", {}).get("critic", {})
         top_n = stage.get("top_n")
@@ -342,7 +351,7 @@ class ResearchOrchestrator:
             bundle = bundles.get(cid)
             if not sig_rec or not bundle:
                 continue
-            if not qualifies_for_premium_llm(bundle, sig_rec.signals):
+            if not self._premium_evidence_ok(bundle, sig_rec.signals):
                 logger.debug(
                     "Skip premium %s (evidence quality / hardware gate)",
                     cid,
@@ -360,7 +369,7 @@ class ResearchOrchestrator:
             sig_rec = index_by_company(self.paths["signals"], SignalRecord).get(company.id)
             if not sig_rec:
                 continue
-            if not qualifies_for_premium_llm(bundle, sig_rec.signals):
+            if not self._premium_evidence_ok(bundle, sig_rec.signals):
                 continue
             from customer_discovery.models.scoring import DeterministicFitScore
 

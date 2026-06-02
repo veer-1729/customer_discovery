@@ -19,7 +19,12 @@ from customer_discovery.sources.yc import (
     load_yc_config,
 )
 from customer_discovery.sources.yc_filters import YCFilterConfig
-from customer_discovery.sources.cmu_filters import CMUFilterConfig, FilterCondition, parse_cli_filter
+from customer_discovery.sources.cmu_filters import (
+    CMUFilterConfig,
+    FilterCondition,
+    load_scrape_preset,
+    parse_cli_filter,
+)
 from customer_discovery.sources.airtable import cmu_dry_run, load_cmu_config
 
 # Register sources
@@ -104,14 +109,19 @@ def scrape(
         "--filter",
         help='CMU filter: FIELD:VALUE or FIELD:operator:VALUE (e.g. "Verticals:contains:AI/ML")',
     ),
-    filter_conjunction: str = typer.Option(
-        "and", "--filter-conjunction", help="CMU filters: and or or"
+    filter_conjunction: Optional[str] = typer.Option(
+        None, "--filter-conjunction", help="CMU filters: and or or (default: and, or preset value)"
     ),
     use_api: bool = typer.Option(False, "--api", help="CMU: fetch via Airtable API (needs API key)"),
     employees: Optional[str] = typer.Option(
         None,
         "--employees",
         help='CMU employee-size range, e.g. "1-30" (includes buckets 1-10, 11-20, 21-30)',
+    ),
+    preset: Optional[str] = typer.Option(
+        None,
+        "--preset",
+        help="CMU scrape preset from config/sources/cmu_airtable.yaml (e.g. bay_pittsburgh_1_30)",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
@@ -142,7 +152,7 @@ def scrape(
         }
     elif source == "cmu":
         filter_config = _build_cmu_filters(
-            from_url, filter_spec, filter_conjunction, employees
+            from_url, filter_spec, filter_conjunction, employees, preset
         )
         if dry_run:
             _cmu_dry_run(filter_config, view)
@@ -181,25 +191,33 @@ def scrape(
 def _build_cmu_filters(
     from_url: Optional[str],
     filter_specs: list[str],
-    conjunction: str,
+    conjunction: Optional[str],
     employees: Optional[str],
+    preset: Optional[str] = None,
 ) -> CMUFilterConfig:
+    base = load_cmu_config()
     if from_url and "airtable.com" in from_url:
         cfg = CMUFilterConfig.from_url(from_url)
-        base = load_cmu_config()
         es = base.get("employee_size", {})
         cfg.employee_buckets = list(es.get("buckets") or cfg.employee_buckets)
         cfg.employee_size_field = es.get("field") or cfg.employee_size_field
+    elif preset:
+        cfg = load_scrape_preset(base, preset)
+        if cfg is None:
+            known = ", ".join(sorted((base.get("scrape_presets") or {}).keys()) or ["(none)"])
+            raise typer.BadParameter(f"Unknown CMU preset {preset!r}. Known: {known}")
     else:
-        cfg = CMUFilterConfig.from_dict(load_cmu_config())
+        cfg = CMUFilterConfig.from_dict(base)
 
     if employees:
         cfg.set_employee_size_range(employees)
 
     extra = [parse_cli_filter(s) for s in filter_specs]
     cfg = cfg.merge_conditions(extra)
-    if conjunction.lower() in ("and", "or"):
+    if conjunction and conjunction.lower() in ("and", "or"):
         cfg.conjunction = conjunction.lower()
+    elif filter_specs and not conjunction:
+        cfg.conjunction = "and"
     return cfg
 
 
@@ -373,6 +391,11 @@ def research_main(
         "--force-search",
         help="Ignore search_state.json and retry web search even if credits were exhausted",
     ),
+    research_config: Optional[Path] = typer.Option(
+        None,
+        "--research-config",
+        help="Path to research YAML (default config/research.yaml)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run the full research pipeline (default when no subcommand)."""
@@ -392,6 +415,7 @@ def research_main(
         estimate_cost=estimate_cost,
         force_refetch=force_refetch,
         force_search=force_search,
+        research_config=research_config,
         verbose=verbose,
     )
 
@@ -415,6 +439,7 @@ def _run_research(**kwargs) -> None:
         estimate_cost=kwargs.get("estimate_cost", False),
         force_refetch=kwargs.get("force_refetch", False),
         force_search=kwargs.get("force_search", False),
+        config_path=kwargs.get("research_config"),
     )
     stats = ResearchOrchestrator(opts).run()
     typer.echo(
@@ -535,6 +560,11 @@ def outreach_main(
     estimate_cost: bool = typer.Option(False, "--estimate-cost"),
     include_manual_review: bool = typer.Option(False, "--include-manual-review"),
     force_regenerate: bool = typer.Option(False, "--force-regenerate"),
+    outreach_config: Optional[Path] = typer.Option(
+        None,
+        "--outreach-config",
+        help="Path to outreach YAML (default config/outreach.yaml)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Generate outreach packs from research leads (default when no subcommand)."""
@@ -555,6 +585,7 @@ def outreach_main(
         estimate_cost=estimate_cost,
         include_manual_review=include_manual_review,
         force_regenerate=force_regenerate,
+        outreach_config=outreach_config,
         verbose=verbose,
     )
 
@@ -583,6 +614,7 @@ def _run_outreach(**kwargs) -> None:
         estimate_cost=kwargs.get("estimate_cost", False),
         include_manual_review=kwargs.get("include_manual_review", False),
         force_regenerate=kwargs.get("force_regenerate", False),
+        config_path=kwargs.get("outreach_config"),
     )
     stats = OutreachOrchestrator(opts).run()
     typer.echo(f"Outreach done. {stats}")
@@ -602,7 +634,22 @@ def outreach_export(
         typer.echo(f"Missing {packs_path}. Run outreach first.", err=True)
         raise typer.Exit(1)
     packs = read_staged(packs_path, OutreachPack)
-    paths = export_outreach_review(output_dir, packs)
+    root = _project_root()
+    briefs_default = root / "data" / "research" / "final_briefs.jsonl"
+    leads_default = root / "data" / "research" / "top_leads.csv"
+    # infer from sibling research dir naming
+    briefs_path = output_dir.parent / output_dir.name.replace("outreach", "research") / "final_briefs.jsonl"
+    leads_path = output_dir.parent / output_dir.name.replace("outreach", "research") / "top_leads.csv"
+    if not briefs_path.exists():
+        briefs_path = briefs_default if briefs_default.exists() else None
+    if not leads_path.exists():
+        leads_path = leads_default if leads_default.exists() else None
+    paths = export_outreach_review(
+        output_dir,
+        packs,
+        briefs_path=briefs_path,
+        leads_path=leads_path,
+    )
     typer.echo(f"Wrote {len(packs)} rows to {paths['review_xlsx']} (open in Excel)")
     typer.echo(f"Packs (markdown): {paths['packs_dir']}/  |  Index: {paths['readme']}")
 

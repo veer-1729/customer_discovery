@@ -11,6 +11,7 @@ from customer_discovery.models.outreach import OutreachContact, OutreachPack
 from customer_discovery.outreach.contact_selector import contact_warnings
 from customer_discovery.outreach.prompts import build_outreach_user_payload
 from customer_discovery.llm.client import LLMClient
+from customer_discovery.outreach.copy_guidelines import build_outreach_system_prompt
 from customer_discovery.research.pipeline.url_catalog import build_important_urls
 
 
@@ -27,15 +28,7 @@ class OutreachLLMOutput(BaseModel):
     discovery_question: str | None = None
 
 
-OUTREACH_SYSTEM = """You prepare outreach drafts for B2B customer discovery.
-Rules:
-- Direct, technical, not salesy (see product.outreach_tone).
-- Use only facts from the research summary and evidence; do not invent customers or features.
-- If contact.name is set, use it in the greeting; otherwise use role-based greeting without inventing a name.
-- email_body: about 120-180 words, one clear discovery_question at the end.
-- linkedin_connection_note: MUST be at most linkedin_max_chars characters.
-- Polish seed_hook if provided; do not contradict it.
-Output valid JSON only."""
+
 
 
 def run_outreach_agent(
@@ -49,6 +42,7 @@ def run_outreach_agent(
     product: dict[str, Any],
     linkedin_max_chars: int,
     rank: int | None = None,
+    outreach_cfg: dict[str, Any] | None = None,
 ) -> OutreachPack:
     user = build_outreach_user_payload(
         company=company,
@@ -60,7 +54,7 @@ def run_outreach_agent(
     )
     out = llm.complete_json(
         model=model,
-        system=OUTREACH_SYSTEM,
+        system=build_outreach_system_prompt(outreach_cfg),
         user=user,
         schema=OutreachLLMOutput,
     )

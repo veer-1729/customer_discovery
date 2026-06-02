@@ -302,7 +302,26 @@ def _escape_formula(value: str) -> str:
 
 
 def parse_cli_filter(spec: str) -> FilterCondition:
-    """Parse FIELD:OPERATOR:VALUE or FIELD:VALUE (default contains)."""
+    """Parse FIELD:OPERATOR:VALUE, FIELD:VALUE, or FIELD::operator:value.
+
+    Use ``::`` when the Airtable column name ends with ``:`` (e.g.
+    ``Company location:::contains:Pittsburgh``).
+    """
+    spec = spec.strip()
+    if "::" in spec:
+        field, rest = spec.split("::", 1)
+        field = field.strip()
+        if rest.startswith(":"):
+            field = f"{field}:"
+            rest = rest[1:]
+        if ":" in rest:
+            operator, value = rest.split(":", 1)
+            return FilterCondition(
+                field=field,
+                operator=operator.strip().lower(),
+                value=value.strip(),
+            )
+        return FilterCondition(field=field, operator="contains", value=rest.strip())
     parts = spec.split(":", 2)
     if len(parts) == 2:
         return FilterCondition(field=parts[0].strip(), operator="contains", value=parts[1].strip())
@@ -312,4 +331,34 @@ def parse_cli_filter(spec: str) -> FilterCondition:
             operator=parts[1].strip().lower(),
             value=parts[2].strip(),
         )
-    raise ValueError(f"Invalid filter spec: {spec!r}. Use FIELD:VALUE or FIELD:operator:VALUE")
+    raise ValueError(
+        f"Invalid filter spec: {spec!r}. Use FIELD:VALUE, FIELD:operator:VALUE, "
+        "or FIELD::operator:value for columns ending with ':'"
+    )
+
+
+def load_scrape_preset(config: dict[str, Any], preset_name: str) -> CMUFilterConfig | None:
+    presets = config.get("scrape_presets") or {}
+    raw = presets.get(preset_name)
+    if not raw:
+        return None
+    conditions = [
+        FilterCondition(
+            field=c["field"],
+            operator=c.get("operator", "contains"),
+            value=c.get("value"),
+        )
+        for c in raw.get("conditions", [])
+    ]
+    cfg = CMUFilterConfig(
+        conditions=conditions,
+        conjunction=str(raw.get("conjunction", "and")).lower(),
+        employee_buckets=list(
+            config.get("employee_size", {}).get("buckets") or DEFAULT_EMPLOYEE_BUCKETS
+        ),
+        employee_size_field=config.get("employee_size", {}).get("field")
+        or "Number of employees:",
+    )
+    if raw.get("employee_size"):
+        cfg.set_employee_size_range(str(raw["employee_size"]))
+    return cfg

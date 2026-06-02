@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from customer_discovery.models.company import CompanyRecord
 from customer_discovery.models.evidence import EvidenceBundle
+from customer_discovery.research.cmu_vertical_fit import score_vertical_alignment
 from customer_discovery.models.scoring import DeterministicFitScore
 from customer_discovery.models.signals import ExtractedCompanySignals
 
@@ -44,6 +45,12 @@ def score_fit(
     if company.batch or company.source in ("yc", "cmu"):
         score += 10
         positive.append("ideal_stage_metadata")
+
+    if company.source == "cmu" and company.industry:
+        v_score, v_pos, v_neg = score_vertical_alignment(company.industry)
+        score += v_score
+        positive.extend(v_pos)
+        negative.extend(v_neg)
 
     if signals.hardware_heavy:
         score -= 35
